@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AERO—41 · Автоматические часы</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@200;300;400;500&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #dcdcd8;
+    --ink: #151515;
+    --mute: #a3a39e;
+    --line: rgba(21, 21, 21, .16);
+    --accent: #ff5a1f;
+    --display: "Unbounded", "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    --pad: clamp(20px, 4vw, 64px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; scrollbar-width: none; }
+  html::-webkit-scrollbar { display: none; }
+  @media (pointer: coarse) { html { scroll-snap-type: y mandatory; } }   /* на тач-экранах свайп доводит до главы */
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--display); font-weight: 300;
+    overflow-x: hidden; -webkit-font-smoothing: antialiased;
+    cursor: grab; touch-action: pan-y;
+  }
+  body.dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+  /* мягкий свет + зерно */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background: radial-gradient(ellipse 70% 60% at 50% 45%, #ecece9 0%, var(--bg) 60%, #c9c9c4 100%);
+  }
+  body::after {
+    content: ""; position: fixed; inset: 0; z-index: 30; pointer-events: none; opacity: .09; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  canvas#stage {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    z-index: 10; pointer-events: none;
+    opacity: 0; transition: opacity 1.4s ease .2s;
+  }
+  canvas#stage.on { opacity: 1; }
+
+  /* ── дорожка прокрутки: пустые шаги, по одному на главу. Сам рассказ закреплён на экране ── */
+  .step { height: 100vh; height: 100svh; scroll-snap-align: start; }
+  #story { position: fixed; inset: 0; z-index: 5; pointer-events: none; transition: opacity .6s; }
+  body.exploded #story { opacity: .08; }
+  .chapter {
+    position: absolute; inset: 0; padding: 104px var(--pad) 96px;
+    display: flex; flex-direction: column; justify-content: center;
+    opacity: 0; visibility: hidden; transition: opacity .45s, visibility 0s .45s;
+  }
+  .chapter.in { opacity: 1; visibility: visible; transition: opacity .45s; }
+  .chapter.right { align-items: flex-end; }
+  .col { position: relative; width: min(430px, 40vw); }
+
+  /* ── шапка ── */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 22px var(--pad);
+    font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  }
+  header .brand { font-family: var(--display); font-weight: 500; font-size: 15px; letter-spacing: .02em; }
+  header .brand sup { font-size: 9px; }
+  header nav { display: flex; gap: clamp(14px, 2.4vw, 36px); }
+  header a { color: inherit; text-decoration: none; position: relative; cursor: pointer; }
+  header nav a::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -4px; height: 1px;
+    background: currentColor; transform: scaleX(0); transform-origin: right; transition: transform .35s;
+  }
+  header nav a:hover::after { transform: scaleX(1); transform-origin: left; }
+  header .right { display: flex; align-items: center; gap: 18px; }
+  .xbtn {
+    font: inherit; letter-spacing: inherit; text-transform: uppercase; color: var(--ink);
+    background: transparent; border: 1px solid var(--ink); border-radius: 999px;
+    padding: 8px 16px; cursor: pointer; transition: background .3s, color .3s;
+  }
+  .xbtn:hover, .xbtn[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  header .right { gap: 10px; } #clock { margin-left: 8px; }
+  #clock { font-variant-numeric: tabular-nums; }
+  #clock i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 8px; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+
+  /* ── нижняя строка: счётчик глав, расцветки, подсказка ── */
+  .counter {
+    position: fixed; left: var(--pad); bottom: 24px; z-index: 20;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .08em;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .counter .bar { width: 90px; height: 1px; background: var(--line); position: relative; }
+  .counter .bar b { position: absolute; left: 0; top: 0; height: 1px; background: var(--ink); width: 0; }
+  .hint {
+    position: fixed; right: var(--pad); bottom: 24px; z-index: 20;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    transition: opacity .4s;
+  }
+  .colors {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .colors button {
+    width: 22px; height: 22px; padding: 0; border-radius: 50%; cursor: pointer;
+    border: 1px solid rgba(0, 0, 0, .28); outline: 1px solid transparent; outline-offset: 3px;
+    transition: transform .25s, outline-color .25s;
+  }
+  .colors button:hover { transform: scale(1.12); }
+  .colors button[aria-pressed="true"] { outline-color: var(--ink); transform: scale(1.12); }
+  .colors span { min-width: 6em; margin-left: 6px; }
+
+  /* ── оглавление справа: чёрточка на главу ── */
+  #rail {
+    position: fixed; right: 10px; top: 50%; transform: translateY(-50%); z-index: 20;
+    display: flex; flex-direction: column; align-items: flex-end;
+  }
+  #rail button {
+    position: relative; width: 26px; height: 20px; background: none; border: 0; cursor: pointer; padding: 0;
+  }
+  #rail button::before {
+    content: ""; position: absolute; right: 0; top: 50%; height: 1px; width: 10px;
+    background: var(--ink); opacity: .35; transition: width .3s, opacity .3s, background .3s;
+  }
+  #rail button:hover::before { width: 18px; opacity: 1; }
+  #rail button[aria-current="true"]::before { width: 24px; opacity: 1; background: var(--accent); height: 2px; }
+  #rail button::after {
+    content: attr(data-name); position: absolute; right: 34px; top: 50%; transform: translateY(-50%);
+    font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+    background: var(--ink); color: var(--bg); padding: 4px 8px; border-radius: 3px;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  #rail button:hover::after { opacity: 1; }
+
+  /* ── типографика ── */
+  .giant {
+    font-weight: 200; font-size: clamp(54px, 12.5vw, 230px);
+    line-height: .95; letter-spacing: -.02em; text-transform: uppercase; white-space: nowrap;
+  }
+  .giant.soft { color: var(--mute); }
+  .label {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px; margin-bottom: 22px;
+  }
+  .label::before { content: ""; width: 28px; height: 1px; background: currentColor; }
+  h2 {
+    font-weight: 200; font-size: clamp(38px, 5.6vw, 96px); line-height: 1; letter-spacing: -.02em;
+    text-transform: uppercase; margin-bottom: 26px;
+  }
+  p.copy, p.say {
+    font-family: var(--mono); font-weight: 300; font-size: clamp(13px, 1.05vw, 15px); line-height: 1.75;
+  }
+  p.say { font-size: clamp(14px, 1.15vw, 17px); }
+  .fact {
+    display: flex; align-items: baseline; gap: 14px; margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #55554f;
+  }
+  .fact b { font-family: var(--display); font-weight: 200; font-size: clamp(34px, 3.6vw, 60px); letter-spacing: -.02em; color: var(--ink); white-space: nowrap; }
+
+  /* появление: заголовок выезжает строками, рассказ — слово за словом */
+  .line { display: block; overflow: hidden; }
+  .line > span { display: inline-block; transform: translateY(105%); transition: transform 1s cubic-bezier(.2, .8, .2, 1) .1s; }
+  .in .line > span { transform: none; }
+  .in .line:nth-child(2) > span { transition-delay: .18s; }
+  .in .line:nth-child(3) > span { transition-delay: .26s; }
+  .in .line:nth-child(4) > span { transition-delay: .34s; }
+  .fade { opacity: 0; transform: translateY(16px); transition: opacity .8s, transform .8s; }
+  .in .fade { opacity: 1; transform: none; transition-delay: .15s; }
+  .in .fact.fade { transition-delay: 1.5s; }
+  .w { display: inline-block; opacity: 0; transform: translateY(8px); transition: opacity .5s, transform .5s; }
+  .in .w { opacity: 1; transform: none; }
+  .chapter:not(.in) .w, .chapter:not(.in) .line > span, .chapter:not(.in) .fade { transition-delay: 0s !important; }
+
+  /* указатель: точка на детали, о которой идёт речь, и линия к рассказу */
+  .pin { position: absolute; top: 6px; width: 1px; height: 1px; }
+  .chapter.left .pin { right: -22px; } .chapter.right .pin { left: -22px; }
+  #callout { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 15; pointer-events: none; opacity: 0; transition: opacity .5s; }
+  #callout.on { opacity: 1; transition-delay: .5s; }
+  #callout line { stroke: var(--ink); stroke-width: 1; opacity: .55; }
+  #ping { position: fixed; left: 0; top: 0; z-index: 16; pointer-events: none; opacity: 0; transition: opacity .5s; }
+  #ping.on { opacity: 1; transition-delay: .5s; }
+  #ping::before, #ping::after { content: ""; position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; }
+  #ping::before { background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+  #ping::after { border: 1px solid var(--accent); animation: ping 1.8s ease-out infinite; }
+  @keyframes ping { from { transform: scale(1); opacity: .9; } to { transform: scale(4.2); opacity: 0; } }
+
+  /* главы с особой вёрсткой */
+  #c-hero { justify-content: space-between; padding-top: 110px; padding-bottom: 90px; }
+  #c-hero .giant:nth-child(2) { text-align: right; }
+  #c-hero .giant:nth-child(3) { padding-left: 14vw; }
+  #c-hero .meta { position: absolute; right: var(--pad); bottom: 90px; text-align: right; }
+  dl { border-top: 1px solid var(--line); }
+  dl div {
+    display: flex; justify-content: space-between; gap: 20px; align-items: baseline;
+    padding: 13px 0; border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 13px;
+  }
+  dt { text-transform: uppercase; letter-spacing: .08em; color: #6d6d68; }
+  dd { text-align: right; }
+  #c-order { justify-content: flex-end; align-items: center; text-align: center; padding-bottom: 104px; }
+  #c-order .giant { position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-58%); font-size: clamp(60px, 15vw, 280px); }
+  #c-order .buy { display: flex; flex-direction: column; align-items: center; gap: 16px; position: relative; z-index: 15; }
+  #c-order.in .buy { pointer-events: auto; }
+  #c-order .price { font-family: var(--mono); font-size: 13px; letter-spacing: .1em; text-transform: uppercase; }
+  #c-order small { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6d6d68; }
+  .btn {
+    font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--bg); background: var(--ink); border: 0; border-radius: 999px;
+    padding: 20px 44px; cursor: pointer; position: relative; overflow: hidden; transition: transform .3s;
+    display: inline-block; text-decoration: none;
+  }
+  .btn span { position: relative; z-index: 1; }
+  .btn::before {
+    content: ""; position: absolute; inset: 0; background: var(--accent);
+    transform: translateY(101%); transition: transform .45s cubic-bezier(.2, .8, .2, 1); border-radius: inherit;
+  }
+  .btn:hover::before { transform: none; }
+  .btn:active { transform: scale(.97); }
+
+  /* ── разборка: подписи деталей ── */
+  #parts { position: fixed; inset: 0; z-index: 15; pointer-events: none; }
+  .part {
+    position: absolute; left: 0; top: 0; opacity: 0; transition: opacity .4s;
+    font-family: var(--mono); font-size: 11px; line-height: 1.5; letter-spacing: .06em;
+  }
+  body.exploded .part { opacity: 1; transition-delay: .55s; }
+  .part span { position: absolute; left: 0; width: var(--w, 150px); transform: translateX(-50%); text-align: center; color: #55554f; }
+  .part.up span { bottom: 0; } .part.down span { top: 0; }
+  .part em { font-style: normal; display: block; }
+  .part strong { font-weight: 400; text-transform: uppercase; letter-spacing: .1em; color: var(--ink); }
+  #parts svg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .4s; }
+  body.exploded #parts svg { opacity: 1; transition-delay: .55s; }
+  #parts line { stroke: var(--ink); stroke-width: 1; opacity: .5; }
+  #parts circle { fill: var(--accent); }
+
+  @media (max-width: 760px) {
+    header nav, .hint, #rail, #clock { display: none; }
+    .colors { left: auto; right: var(--pad); transform: none; } .colors span { display: none; }
+    /* на телефоне рассказ лежит поверх часов на матовой подложке: низ часов мягко уходит под текст */
+    #story { z-index: 12; }
+    .chapter.left, .chapter.right { justify-content: flex-end; align-items: stretch; padding-bottom: 0; }
+    .col {
+      width: auto; margin: 0 calc(-1 * var(--pad)); padding: 64px var(--pad) 84px;
+      background: rgba(222, 222, 218, .8); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 56px); mask-image: linear-gradient(to bottom, transparent, #000 56px);
+    }
+    #c-order .giant { font-size: 11.5vw; }
+    #c-order .price { max-width: 28ch; line-height: 1.6; }
+    .label { margin-bottom: 14px; }
+    h2 { font-size: clamp(34px, 10.5vw, 52px); }
+    h2 { margin-bottom: 14px; } .fact { margin-top: 14px; padding-top: 10px; }
+    .chapter.left .pin, .chapter.right .pin { left: 50%; right: auto; top: 44px; }
+    #c-hero .giant:nth-child(3) { padding-left: 0; }
+    #c-hero .meta { position: static; text-align: left; }
+    .part { font-size: 9px; } .part em { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .line > span, .fade, .w { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+<div id="parts" aria-hidden="true"></div>
+<svg id="callout" aria-hidden="true"><line/></svg>
+<div id="ping" aria-hidden="true"></div>
+
+<header>
+  <a class="brand" data-go="0">AERO<sup>®</sup></a>
+  <nav>
+    <a data-go="0">Модель</a>
+    <a data-go="1">Детали</a>
+    <a data-go="5">Механизм</a>
+    <a data-go="6">Характеристики</a>
+    <a data-go="7">Контакт</a>
+  </nav>
+  <div class="right">
+    <button class="xbtn" id="sound" type="button" aria-pressed="false" title="Тиканье механизма">♪ Звук</button>
+    <button class="xbtn" id="explode" type="button" aria-pressed="false">Разобрать</button>
+    <div id="clock"><i></i><span>00:00:00</span></div>
+  </div>
+</header>
+
+<div class="counter"><span id="num">01</span><span class="bar"><b id="bar"></b></span><span id="total">08</span></div>
+<div class="colors" id="colors" role="group" aria-label="Расцветка часов"></div>
+<div class="hint" id="hint">Листайте — расскажу о часах ↓</div>
+<nav id="rail" aria-label="Главы"></nav>
+
+<!-- закреплённый рассказ: главы сменяют друг друга на месте, пока часы поворачиваются нужной стороной -->
+<div id="story">
+  <article class="chapter" id="c-hero" data-name="Знакомство">
+    <h1 class="giant"><span class="line"><span>Aero—41</span></span></h1>
+    <div class="giant"><span class="line"><span>The</span></span></div>
+    <div class="giant soft"><span class="line"><span>Quiet</span></span></div>
+    <div class="giant soft"><span class="line"><span>41mm</span></span></div>
+    <div class="meta fade">
+      <p class="copy">Автоматические часы<br>из стали 316L.<br>Демо-проект: 3D-сайт для товара.</p>
+    </div>
+  </article>
+
+  <article class="chapter left" data-name="Циферблат" data-anchor="-0.36,0,0.13">
+    <div class="col">
+      <i class="pin"></i>
+      <div class="label fade">01 — Циферблат</div>
+      <h2><span class="line"><span>Лицо</span></span><span class="line"><span style="color:var(--mute)">времени</span></span></h2>
+      <p class="say">Начнём с главного — посмотрите на циферблат. Это хронограф: три малых счётчика отдельно ведут секунды, минуты и часы. А по самому краю идёт шкала с шагом в пятую долю секунды.</p>
+      <div class="fact fade"><b>1/5 с</b><span>точность отсчёта хронографа</span></div>
+    </div>
+  </article>
+
+  <article class="chapter right" data-name="Безель" data-anchor="0.62,0.62,0.225">
+    <div class="col">
+      <i class="pin"></i>
+      <div class="label fade">02 — Безель</div>
+      <h2><span class="line"><span>Кольцо,</span></span><span class="line"><span style="color:var(--mute)">которое помнит</span></span></h2>
+      <p class="say">Теперь наклоним часы и пройдём взглядом по краю. Это безель: рифлёная грань, чтобы пальцы не скользили, и вставка из керамики. Её не берут ни ключи, ни песок, ни годы — шкала останется такой же чёткой.</p>
+      <div class="fact fade"><b>60</b><span>минутных делений на шкале</span></div>
+    </div>
+  </article>
+
+  <article class="chapter left" data-name="Управление" data-anchor="1.19,0,-0.03">
+    <div class="col">
+      <i class="pin"></i>
+      <div class="label fade">03 — Управление</div>
+      <h2><span class="line"><span>Старт.</span></span><span class="line"><span>Стоп.</span></span><span class="line"><span style="color:var(--mute)">Сброс.</span></span></h2>
+      <p class="say">Повернём часы боком. Посередине — заводная головка: ею заводят механизм и переводят стрелки. Сверху и снизу — две кнопки хронографа: одна запускает и останавливает отсчёт, вторая возвращает стрелки на ноль.</p>
+      <div class="fact fade"><b>2 + 1</b><span>две кнопки и головка</span></div>
+    </div>
+  </article>
+
+  <article class="chapter right" data-name="Браслет" data-anchor="0,1.75,-1.1">
+    <div class="col">
+      <i class="pin"></i>
+      <div class="label fade">04 — Браслет</div>
+      <h2><span class="line"><span>Пять</span></span><span class="line"><span style="color:var(--mute)">рядов стали</span></span></h2>
+      <p class="say">Обойдём часы сзади. Браслет собран из пяти рядов звеньев: по краям — матовые, между ними — зеркальные. Поэтому при каждом движении руки свет бежит по нему, как по воде. К застёжке браслет сужается, чтобы не мешать запястью.</p>
+      <div class="fact fade"><b>316L</b><span>хирургическая сталь, не темнеет</span></div>
+    </div>
+  </article>
+
+  <article class="chapter left" data-name="Механизм" data-anchor="0,0,-0.225">
+    <div class="col">
+      <i class="pin"></i>
+      <div class="label fade">05 — Механизм</div>
+      <h2><span class="line"><span>Сердце</span></span><span class="line"><span style="color:var(--mute)">без батарейки</span></span></h2>
+      <p class="say">А теперь самое интересное — заглянем внутрь через прозрачную крышку. Золотой полукруг — это ротор: он качается от движения вашей руки и сам заводит пружину. Маленькое колесо рядом — баланс, он отбивает ритм восемь раз в секунду.</p>
+      <div class="fact fade"><b>72 ч</b><span>идут без движения — трое суток</span></div>
+    </div>
+  </article>
+
+  <article class="chapter right" data-name="Характеристики">
+    <div class="col">
+      <div class="label fade">06 — Характеристики</div>
+      <h2><span class="line"><span>Коротко</span></span><span class="line"><span style="color:var(--mute)">о главном</span></span></h2>
+      <dl class="fade">
+        <div><dt>Диаметр</dt><dd>41 мм</dd></div>
+        <div><dt>Толщина</dt><dd>10,8 мм</dd></div>
+        <div><dt>Механизм</dt><dd>Автоматический, 28 800 пк/ч</dd></div>
+        <div><dt>Запас хода</dt><dd>72 часа</dd></div>
+        <div><dt>Стекло</dt><dd>Сапфир, двойной антиблик</dd></div>
+        <div><dt>Водозащита</dt><dd>100 м</dd></div>
+      </dl>
+    </div>
+  </article>
+
+  <article class="chapter" id="c-order" data-name="Контакт">
+    <div class="giant"><span class="line"><span>Make time</span></span></div>
+    <div class="buy fade">
+      <div class="price">Это демо. Сделаю такой же сайт для вашего товара</div>
+      <a class="btn" href="https://t.me/zwadawraze" target="_blank" rel="noopener"><span>Хочу такой сайт</span></a>
+      <small>Telegram @zwadawraze · бренд и часы вымышлены</small>
+    </div>
+  </article>
+</div>
+
+<main id="track" aria-hidden="true"></main>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script>
+/* ── главы: шаги прокрутки, оглавление, рассказ слово за словом ── */
+const chapters = [...document.querySelectorAll('.chapter')];
+const track = document.getElementById('track'), rail = document.getElementById('rail');
+const steps = chapters.map(() => { const s = document.createElement('section'); s.className = 'step'; track.append(s); return s; });
+const railBtns = chapters.map((c, i) => {
+  const b = document.createElement('button');
+  b.type = 'button'; b.dataset.name = c.dataset.name; b.setAttribute('aria-label', c.dataset.name);
+  b.addEventListener('click', () => go(i)); rail.append(b); return b;
+});
+document.getElementById('total').textContent = String(chapters.length).padStart(2, '0');
+document.querySelectorAll('.say').forEach(p => {
+  p.innerHTML = p.textContent.trim().split(/\s+/).map((w, i) => `<span class="w" style="transition-delay:${(.45 + i * .03).toFixed(2)}s">${w}</span>`).join(' ');
+});
+
+requestAnimationFrame(() => chapters[0].classList.add('in'));   // заголовок появляется сразу, не дожидаясь загрузки 3D
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function go(i) {
+  i = Math.max(0, Math.min(chapters.length - 1, i));
+  scrollTo({ top: steps[i].offsetTop, behavior: still ? 'auto' : 'smooth' });
+}
+const nearest = () => Math.round(scrollY / innerHeight);
+document.querySelectorAll('[data-go]').forEach(a => a.addEventListener('click', () => go(+a.dataset.go)));
+
+// одно движение колеса — одна глава: листаешь не страницу, а рассказ
+let lastWheel = 0, lockUntil = 0;
+addEventListener('wheel', e => {
+  if (e.ctrlKey) return;
+  e.preventDefault();
+  const now = performance.now(), fresh = now - lastWheel > 140; lastWheel = now;
+  if (!fresh || now < lockUntil || Math.abs(e.deltaY) < 4) return;
+  lockUntil = now + 650; go(nearest() + Math.sign(e.deltaY));
+}, { passive: false });
+addEventListener('keydown', e => {
+  if (e.target.closest('button, a') && e.key === ' ') return;
+  const d = { ArrowDown: 1, PageDown: 1, ' ': 1, ArrowUp: -1, PageUp: -1 }[e.key];
+  if (d) { e.preventDefault(); go(nearest() + d); }
+  else if (e.key === 'Home') { e.preventDefault(); go(0); }
+  else if (e.key === 'End') { e.preventDefault(); go(chapters.length - 1); }
+});
+
+/* ── тиканье: звук синтезируется в браузере, без аудиофайлов. Включается кнопкой — браузеры не дают звучать без клика ── */
+const soundBtn = document.getElementById('sound');
+const TICK_MS = 500;                                        // неспешное «тик… так» — два удара в секунду, как у старых настенных часов
+const LEVELS = [.5, .6, .5, .65, .5, 1, .45, .4];          // громкость по главам: у механизма — громче всего
+const BANK_GAIN = 6;
+let actx, G, master, soundOn = false, nextTick = 0, tickTimer, chapterNow = 0;
+// Тёплый «деревянный» звук: корпус отзывается на низких и средних частотах, верхов почти нет.
+// Два набора резонансов: «тик» и заметно более низкий «так».
+function makeBank(ctx, out, pitch) {
+  const input = ctx.createGain();
+  for (const [f, q, lvl] of [[420, 11, 1], [930, 9, .7], [1900, 7, .35], [3200, 5, .12]]) {
+    const bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    bp.type = 'bandpass'; bp.frequency.value = f * pitch; bp.Q.value = q; g.gain.value = lvl * BANK_GAIN;
+    input.connect(bp).connect(g).connect(out);
+  }
+  return input;
+}
+function buildGraph(ctx) {
+  const out = ctx.createGain(), hp = ctx.createBiquadFilter();
+  hp.type = 'lowpass'; hp.frequency.value = 3800; hp.Q.value = .5; hp.connect(out);   // срезаем верха, чтобы щелчок не резал ухо
+  const noise = ctx.createBuffer(1, ctx.sampleRate * .25, ctx.sampleRate), d = noise.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return { out, noise, banks: [makeBank(ctx, hp, 1), makeBank(ctx, hp, .8)] };
+}
+// Один удар: тихий предщелчок и через ~18 мс основной, с мягкой атакой и плавным затуханием.
+function tickAt(ctx, g, time, k) {
+  const tock = k % 2, src = ctx.createBufferSource(), env = ctx.createGain();
+  const vol = (tock ? .85 : 1) * (.93 + Math.random() * .14);              // удары чуть разные, как в жизни
+  src.buffer = g.noise; env.gain.setValueAtTime(.0001, time);
+  for (const [dt, a] of [[0, .25], [.018, 1]]) {
+    env.gain.setValueAtTime(.0001, time + dt);
+    env.gain.exponentialRampToValueAtTime(a * vol, time + dt + .002);
+    env.gain.exponentialRampToValueAtTime(.0001, time + dt + .014);
+  }
+  src.connect(env).connect(g.banks[tock]); src.start(time, Math.random() * .15, .06);
+}
+function scheduleTicks() {                                    // ставим удары в очередь чуть заранее, чтобы ритм не плавал
+  const now = performance.now();
+  while (nextTick < now + 300) {
+    if (nextTick > now) tickAt(actx, G, actx.currentTime + (nextTick - now) / 1000, Math.round(nextTick / TICK_MS));
+    nextTick += TICK_MS;
+  }
+}
+const setLevel = () => master && master.gain.setTargetAtTime(soundOn ? LEVELS[chapterNow] * .5 : 0, actx.currentTime, .35);
+window.onChapter = i => { chapterNow = i; setLevel(); };      // вызывается при смене главы
+soundBtn.addEventListener('click', () => {
+  if (!actx) {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    G = buildGraph(actx); master = G.out; master.gain.value = 0; master.connect(actx.destination);
+  }
+  soundOn = !soundOn; soundBtn.setAttribute('aria-pressed', soundOn);
+  clearInterval(tickTimer);
+  if (soundOn) {
+    actx.resume();
+    nextTick = Math.ceil(performance.now() / TICK_MS) * TICK_MS;
+    tickTimer = setInterval(scheduleTicks, 100); scheduleTicks();
+  }
+  setLevel();
+});
+
+const clockEl = document.querySelector('#clock span');
+const pad = n => String(n).padStart(2, '0');
+setInterval(() => { const d = new Date(); clockEl.textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }, 250);
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildWatch } from './watch.js';
+
+const canvas = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.03).texture;
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+camera.position.z = 11;
+const key = new THREE.DirectionalLight(0xffffff, 2.8); key.position.set(3, 5, 6); scene.add(key);
+// тени: основной свет отбрасывает их с детали на деталь
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -.0004; key.shadow.normalBias = .012; key.shadow.radius = 4;
+Object.assign(key.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 1, far: 24 });
+const rim = new THREE.DirectionalLight(0xffffff, 1.8); rim.position.set(-5, 1, -3); scene.add(rim);
+const fill = new THREE.DirectionalLight(0xffffff, 1.2); fill.position.set(-2, -4, 5); scene.add(fill);
+
+const { watch, update: updateWatch, parts, anchor, setVariant } = buildWatch(scene);
+
+/* ── расцветки ── */
+const VARIANTS = [
+  { name: 'Графит', dial: ['#2c3540', '#161b21', '#090b0e'], bezel: '#0c0e11', accent: '#ff5a1f', metal: [0xe2e5e9, 0xf4f6f8], sw: ['#d5d8dc', '#1b2026'] },
+  { name: 'Океан',  dial: ['#3a7be0', '#123c94', '#06194a'], bezel: '#0a2a6e', accent: '#ff5a1f', metal: [0xe2e5e9, 0xf4f6f8], sw: ['#d5d8dc', '#1a4bb0'] },
+  { name: 'Лес',    dial: ['#35996b', '#0f5438', '#04271a'], bezel: '#0b3f2b', accent: '#f2c14e', metal: [0xe2e5e9, 0xf4f6f8], sw: ['#d5d8dc', '#12633f'] },
+  { name: 'Золото', dial: ['#4d3c22', '#1e170c', '#0a0704'], bezel: '#140e06', accent: '#e9c06a', metal: [0xe8c47c, 0xf5d893], sw: ['#dcb866', '#1e170c'] },
+  { name: 'Стелс',  dial: ['#2f3338', '#141619', '#050607'], bezel: '#08090a', accent: '#e8372c', metal: [0x3b3e44, 0x555a61], sw: ['#33363b', '#e8372c'] },
+];
+const colorsEl = document.getElementById('colors'), colorName = document.createElement('span');
+const swatches = VARIANTS.map((v, i) => {
+  const b = document.createElement('button');
+  b.type = 'button'; b.title = v.name; b.setAttribute('aria-label', 'Расцветка: ' + v.name);
+  b.style.background = `linear-gradient(135deg, ${v.sw[0]} 50%, ${v.sw[1]} 50%)`;
+  b.addEventListener('click', () => pickVariant(i));
+  colorsEl.append(b); return b;
+});
+colorsEl.append(colorName);
+function pickVariant(i) {
+  const v = VARIANTS[i];
+  setVariant(v);
+  document.documentElement.style.setProperty('--accent', v.accent);
+  colorName.textContent = v.name;
+  swatches.forEach((b, j) => b.setAttribute('aria-pressed', j === i));
+}
+pickVariant(0);
+
+/* ── подписи деталей для режима разборки ── */
+const partsEl = document.getElementById('parts'), v3 = new THREE.Vector3();
+const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'); partsEl.append(svg);
+const labels = parts.map((p, i) => {
+  const el = document.createElement('div'), up = i % 2 === 0;                 // подписи чередуются: сверху и снизу
+  el.className = 'part ' + (up ? 'up' : 'down');
+  el.innerHTML = `<span><strong>${p.name}</strong><em>${p.mat}</em></span>`;
+  const line = document.createElementNS(NS, 'line'), dot = document.createElementNS(NS, 'circle'); dot.setAttribute('r', 3.5);
+  partsEl.append(el); svg.append(line, dot);
+  return { el, line, dot, up, ax: 0, ay: 0 };
+});
+function layoutLabels() {
+  labels.forEach((l, i) => { anchor(i, l.up ? 1 : -1, v3).project(camera); l.ax = (v3.x * .5 + .5) * vw; l.ay = (-v3.y * .5 + .5) * vh; });
+  for (const up of [true, false]) {
+    // подписи одного ряда расставляются по порядку деталей с фиксированным шагом, чтобы не наезжали
+    const row = labels.filter(l => l.up === up).sort((p, q) => p.ax - q.ax), n = row.length;
+    const gap = Math.min(170, (vw - 24) / n), half = gap * n / 2 + 12;
+    const mid = Math.min(Math.max(row.reduce((s, l) => s + l.ax, 0) / n, half), vw - half), railY = vh * (up ? .165 : .835);
+    partsEl.style.setProperty('--w', (gap - 14) + 'px');
+    row.forEach((l, j) => {
+      const lx = mid + (j - (n - 1) / 2) * gap;
+      l.el.style.transform = `translate(${lx}px, ${railY}px)`;
+      l.line.setAttribute('x1', l.ax); l.line.setAttribute('y1', l.ay);
+      l.line.setAttribute('x2', lx); l.line.setAttribute('y2', railY + (up ? 8 : -8));
+      l.dot.setAttribute('cx', l.ax); l.dot.setAttribute('cy', l.ay);
+    });
+  }
+}
+
+/* ── позы часов: по одной на главу, часы поворачиваются той деталью, о которой идёт рассказ ── */
+const TAU = Math.PI * 2;
+const poses = [
+  { x: 0,    y: 0,    s: 1,    rx: -.28, ry: .6,             rz: .14 },   // знакомство
+  { x: 1.9,  y: 0,    s: 1.7,  rx: -.06, ry: -.22,           rz: 0 },     // циферблат — крупно, анфас
+  { x: -1.9, y: -.25, s: 1.9,  rx: -.95, ry: .3,             rz: .12 },   // безель — часы наклонены, взгляд вдоль края
+  { x: 1.7,  y: 0,    s: 1.9,  rx: .12,  ry: -1.2,           rz: 0 },     // головка и кнопки — вид сбоку
+  { x: -2.0, y: .1,   s: 1.1,  rx: .4,   ry: -TAU + 2.3,     rz: -.08 },   // браслет — вид сзади-сбоку
+  { x: 2.0,  y: 0,    s: 1.45, rx: .18,  ry: -Math.PI + .62, rz: -.08 },  // механизм — задняя крышка
+  { x: -2.3, y: 0,    s: .95,  rx: -.2,  ry: -TAU + .55,     rz: .1 },    // характеристики
+  { x: 0,    y: .55,  s: .82,  rx: -.3,  ry: -2 * TAU + .45, rz: .1 },    // заказ
+];
+// точка на часах (в координатах модели), на которую указывает рассказ в каждой главе
+const anchors = chapters.map(c => c.dataset.anchor ? new THREE.Vector3(...c.dataset.anchor.split(',').map(Number)) : null);
+const pins = chapters.map(c => c.querySelector('.pin'));
+const calloutEl = document.getElementById('callout'), calloutLine = calloutEl.querySelector('line'), pingEl = document.getElementById('ping');
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = t => t * t * t * (t * (t * 6 - 15) + 10);
+
+let vw = 1, vh = 1;
+function resize() {
+  vw = innerWidth || 1; vh = innerHeight || 1;      // вкладка может загрузиться в фоне с нулевым размером
+  renderer.setSize(vw, vh, false);
+  camera.aspect = vw / vh; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+const mouse = { x: 0, y: 0, sx: 0, sy: 0 };
+addEventListener('pointermove', e => { mouse.x = e.clientX / vw * 2 - 1; mouse.y = e.clientY / vh * 2 - 1; });
+
+/* ── вращение перетаскиванием: зажать и тянуть, после отпускания — инерция ── */
+const drag = { on: false, x: 0, y: 0, rx: 0, ry: 0, vx: 0, vy: 0 };
+addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.target.closest('a, button')) return;
+  drag.on = true; drag.reset = false; drag.x = e.clientX; drag.y = e.clientY; drag.vx = drag.vy = 0;
+  document.body.classList.add('dragging');
+});
+addEventListener('pointermove', e => {
+  if (!drag.on) return;
+  drag.vy = (e.clientX - drag.x) * .009; drag.vx = (e.clientY - drag.y) * .009;
+  drag.x = e.clientX; drag.y = e.clientY;
+  drag.ry += drag.vy; drag.rx = Math.max(-1.3, Math.min(1.3, drag.rx + drag.vx));
+});
+const endDrag = () => { drag.on = false; document.body.classList.remove('dragging'); };
+addEventListener('pointerup', endDrag); addEventListener('pointercancel', endDrag); addEventListener('blur', endDrag);
+
+const numEl = document.getElementById('num'), barEl = document.getElementById('bar'), hintEl = document.getElementById('hint');
+let sp = 0, active = -1;   // сглаженный прогресс скролла в главах и номер показанной главы
+
+/* ── разборка по кнопке ── */
+let exploded = false, spAt = 0;
+const exBtn = document.getElementById('explode');
+function setExploded(v) {
+  exploded = v; spAt = sp;
+  document.body.classList.toggle('exploded', v);
+  exBtn.textContent = v ? 'Собрать' : 'Разобрать'; exBtn.setAttribute('aria-pressed', v);
+  drag.reset = true; drag.vx = drag.vy = 0;          // сбросить ручной поворот, чтобы слои встали в ряд
+}
+exBtn.addEventListener('click', () => setExploded(!exploded));
+
+function frame(ms) {
+  if (innerWidth !== vw || innerHeight !== vh) resize();
+  const t = ms / 1000, target = Math.max(0, Math.min(poses.length - 1, scrollY / vh)) || 0;
+  if (!Number.isFinite(sp)) sp = target;
+  const scrolling = Math.abs(target - sp) > .02;
+  if (exploded && Math.abs(target - spAt) > .35) setExploded(false);   // ушли в другую главу — собрать обратно
+  const E = updateWatch(t, exploded);
+  sp = still ? target : lerp(sp, target, .06);
+  if (!drag.on) {
+    if (scrolling || drag.reset) {                     // при смене главы и разборке часы возвращаются в позу главы
+      drag.ry = Math.atan2(Math.sin(drag.ry), Math.cos(drag.ry)) * .9; drag.rx *= .9; drag.vx = drag.vy = 0;
+      if (Math.abs(drag.rx) + Math.abs(drag.ry) < .002) drag.reset = false;
+    } else {                                           // инерция после отпускания
+      drag.ry += drag.vy; drag.rx = Math.max(-1.3, Math.min(1.3, drag.rx + drag.vx));
+      drag.vx *= .94; drag.vy *= .94;
+    }
+  }
+  mouse.sx = lerp(mouse.sx, mouse.x, .05); mouse.sy = lerp(mouse.sy, mouse.y, .05);
+
+  // показать главу, к которой ближе всего
+  const now = Math.round(sp);
+  if (now !== active) {
+    active = now;
+    chapters.forEach((c, j) => c.classList.toggle('in', j === now));
+    railBtns.forEach((b, j) => b.setAttribute('aria-current', j === now));
+    window.onChapter?.(now);
+  }
+
+  const i = Math.min(poses.length - 2, Math.floor(sp)), f = ease(Math.min(1, sp - i)), a = poses[i], b = poses[i + 1];
+  const narrow = Math.min(1, Math.max(0, (camera.aspect - .8) / .8));   // на узких экранах часы остаются по центру
+  const fit = lerp(.62, 1, narrow);
+  const float = still ? 0 : 1;
+
+  // когда часы стоят сбоку от текста, на нешироком окне они уменьшаются, чтобы не закрывать рассказ
+  const tight = Math.min(1, camera.aspect / 1.6), room = lerp(1, tight, Math.min(1, Math.abs(lerp(a.x, b.x, f)) / 1.7) * narrow);   // на телефоне часы стоят над текстом, ужимать не нужно
+  watch.position.x = lerp(a.x, b.x, f) * narrow * tight;
+  watch.position.y = lerp(a.y, b.y, f) + Math.sin(t * .9) * .05 * float + (1 - narrow) * (.45 + .62 * Math.min(1, Math.abs(lerp(a.x, b.x, f)) / 1.7));
+  watch.scale.setScalar(lerp(a.s, b.s, f) * fit * room);
+  watch.rotation.x = lerp(a.rx, b.rx, f) + mouse.sy * .1 + Math.sin(t * .7) * .025 * float + drag.rx;
+  watch.rotation.y = lerp(a.ry, b.ry, f) + mouse.sx * .16 + Math.sin(t * .5) * .06 * float + drag.ry;
+  watch.rotation.z = lerp(a.rz, b.rz, f);
+
+  // разборка: часы встают в центр боком, слои разъезжаются вдоль оси, подписи следуют за деталями
+  if (E > .001) {
+    const k = E * E * (3 - 2 * E), baseRy = lerp(a.ry, b.ry, f);
+    watch.position.x = lerp(watch.position.x, -.35 * fit, k);   // сдвиг влево: сзади деталей больше, чем спереди
+    watch.position.y = lerp(watch.position.y, .05, k);
+    watch.scale.setScalar(lerp(watch.scale.x, .7 * fit, k));
+    watch.rotation.y += Math.atan2(Math.sin(-.9 - baseRy), Math.cos(-.9 - baseRy)) * k;
+    watch.rotation.x += (.3 - lerp(a.rx, b.rx, f)) * k;        // лёгкий вид сверху: видна толщина деталей
+    watch.rotation.z *= 1 - k;
+  }
+  watch.updateMatrixWorld(true);
+  if (E > .001) layoutLabels();
+
+  // указатель: линия от рассказа к детали, о которой идёт речь
+  const A = anchors[active], showCall = !!A && !exploded && E < .05 && Math.abs(sp - active) < .1;
+  calloutEl.classList.toggle('on', showCall); pingEl.classList.toggle('on', showCall);
+  if (A && Math.abs(sp - active) < .3) {
+    watch.localToWorld(v3.copy(A)).project(camera);
+    const ax = (v3.x * .5 + .5) * vw, ay = (-v3.y * .5 + .5) * vh, r = pins[active].getBoundingClientRect();
+    calloutLine.setAttribute('x1', r.left); calloutLine.setAttribute('y1', r.top);
+    calloutLine.setAttribute('x2', ax); calloutLine.setAttribute('y2', ay);
+    pingEl.style.transform = `translate(${ax}px, ${ay}px)`;
+  }
+
+  numEl.textContent = String(active + 1).padStart(2, '0');
+  barEl.style.width = (sp / (poses.length - 1) * 100) + '%';
+  hintEl.style.opacity = sp > .15 ? 0 : 1;
+
+  key.position.set(watch.position.x + 3.5, watch.position.y + 4.5, 7); key.target = watch;   // свет следует за часами
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(t => { canvas.classList.add('on'); frame(t); });
+</script>
+</body>
+</html>
