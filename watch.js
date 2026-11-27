@@ -228,6 +228,16 @@ export function buildWatch(scene, opts = {}) {
   // у «dress» стрелки гранёные «дофин» без люма, секундная — синёная
   const hHand = makeHand(dress ? [[-.012, -.08], [.012, -.08], [.052, .13], [0, .42], [-.052, .13]] : [[-.03, -.09], [.03, -.09], [.046, .3], [0, .43], [-.046, .3]], .042, .1, .29, .148);
   const mHand = makeHand(dress ? [[-.01, -.08], [.01, -.08], [.042, .17], [0, .69], [-.042, .17]] : [[-.024, -.09], [.024, -.09], [.036, .54], [0, .7], [-.036, .54]], .032, .14, .52, .166);
+  // библиотека стрелок (только у «dress»): дофин, меч, лист — все лежат в модели, показывается один набор
+  const handSets = [[hHand.children[0], mHand.children[0]]];
+  if (dress) for (const [hp, mp] of [
+    [[[-.03, -.08], [.03, -.08], [.03, .35], [0, .42], [-.03, .35]], [[-.023, -.08], [.023, -.08], [.023, .62], [0, .69], [-.023, .62]]],
+    [[[-.01, -.08], [.01, -.08], [.03, .04], [.06, .2], [0, .43], [-.06, .2], [-.03, .04]], [[-.008, -.08], [.008, -.08], [.024, .1], [.048, .34], [0, .7], [-.048, .34], [-.024, .1]]],
+  ]) {
+    const a = add(extrude(poly(hp), .008, .003), polished, 0, 0, 0, hHand), b = add(extrude(poly(mp), .008, .003), polished, 0, 0, 0, mHand);
+    a.visible = b.visible = false; handSets.push([a, b]);
+  }
+  const setHands = i => handSets.forEach((set, j) => set.forEach(m => { m.visible = j === i; }));
   const sHand = new THREE.Group(); sHand.position.z = .186; cur.add(sHand);
   const secMat = dress ? blued : orange;
   { const g = new THREE.BoxGeometry(dress ? .009 : .011, .98, .006); g.translate(0, .98 / 2 - .22, 0); add(g, secMat, 0, 0, 0, sHand); }
@@ -310,7 +320,7 @@ export function buildWatch(scene, opts = {}) {
 
   /* ── задняя крышка с видимым механизмом ── */
   const back = layer(-2.3, -.16, true), cover = layer(-3.1, -.16, true);
-  cylZ(.6, .12, brass, 0, 0, -.062, back, 64);                 // тело механизма
+  cylZ(.6, .12, dress ? brushed : brass, 0, 0, -.062, back, 64);   // тело механизма: у «dress» стальное, как у NH35
   cylZ(.615, .03, polished, 0, 0, -.02, back, 64);             // стальное кольцо-держатель
   add(extrude(gearShape(.825, .825, 48, .6), .03), brushed, 0, 0, .026, cover);   // толщина задней крышки
   back.userData.spin = true;                                  // при разборке механизм разворачивается лицом к зрителю
@@ -318,14 +328,23 @@ export function buildWatch(scene, opts = {}) {
   const plateCv = makeCanvas(1024), plateTex = colorTex(plateCv);
   {
     const c = plateCv.getContext('2d');
-    c.fillStyle = '#b8bcc2'; c.fillRect(0, 0, 1024, 1024);
-    c.save(); c.translate(512, 512); c.rotate(-.5);
-    for (let x = -800; x < 800; x += 84) {
-      const g = c.createLinearGradient(x, 0, x + 84, 0);
-      g.addColorStop(0, '#888d95'); g.addColorStop(.5, '#eef0f2'); g.addColorStop(1, '#8f949b');
-      c.fillStyle = g; c.fillRect(x, -800, 84, 1600);
+    c.fillStyle = dress ? '#a4a9b0' : '#b8bcc2'; c.fillRect(0, 0, 1024, 1024);
+    if (dress) {
+      // «рабочая» отделка, как у NH35: серая сталь с перлажем — рядами мелких круговых шлифовок
+      for (let y = 0, r = 0; y < 1060; y += 34, r++) for (let x = (r % 2) * 20; x < 1060; x += 40) {
+        const g = c.createRadialGradient(x - 6, y - 6, 1, x, y, 24);
+        g.addColorStop(0, 'rgba(255,255,255,.5)'); g.addColorStop(.55, 'rgba(160,166,174,.25)'); g.addColorStop(1, 'rgba(60,66,74,.4)');
+        c.fillStyle = g; c.beginPath(); c.arc(x, y, 24, 0, TAU); c.fill();
+      }
+    } else {
+      c.save(); c.translate(512, 512); c.rotate(-.5);
+      for (let x = -800; x < 800; x += 84) {
+        const g = c.createLinearGradient(x, 0, x + 84, 0);
+        g.addColorStop(0, '#888d95'); g.addColorStop(.5, '#eef0f2'); g.addColorStop(1, '#8f949b');
+        c.fillStyle = g; c.fillRect(x, -800, 84, 1600);
+      }
+      c.restore();
     }
-    c.restore();
     c.strokeStyle = 'rgba(30,34,40,.75)'; c.lineWidth = 7; c.lineCap = 'round';                         // контуры мостов
     c.beginPath(); c.moveTo(60, 430); c.bezierCurveTo(300, 380, 420, 620, 980, 520); c.stroke();
     c.beginPath(); c.moveTo(520, 40); c.bezierCurveTo(470, 300, 640, 420, 600, 990); c.stroke();
@@ -356,10 +375,23 @@ export function buildWatch(scene, opts = {}) {
   }
   // ротор автоподзавода
   const rotor = new THREE.Group(); rotor.position.z = .03; back.add(rotor);
+  let rotorSeg;
+  const steelRotor = new THREE.MeshStandardMaterial({ color: 0xdfe2e6, metalness: 1, roughness: .34, roughnessMap: brushTex, envMapIntensity: 1.9, side: THREE.DoubleSide });
+  const rotorMats = [rose, steelRotor, gold, blued];             // библиотека роторов
+  const setRotor = i => { rotorSeg.material = rotorMats[i] || rotorMats[0]; };
   {
     const s = new THREE.Shape();
     s.moveTo(.56, 0); s.absarc(0, 0, .56, 0, Math.PI, false); s.lineTo(-.44, 0); s.absarc(0, 0, .44, Math.PI, 0, true); s.closePath();
-    add(extrude(s, .022, .004), dress ? rose : gold, 0, 0, 0, rotor);                                   // тяжёлый сегмент
+    rotorSeg = add(extrude(s, .022, .004), dress ? rose : gold, 0, 0, 0, rotor);                        // тяжёлый сегмент
+    if (dress) {
+      // гравировка по дуге ротора, как на заводском роторе этого механизма
+      const cv = makeCanvas(1024), c = cv.getContext('2d'), tex = colorTex(cv);
+      c.clearRect(0, 0, 1024, 1024); c.fillStyle = 'rgba(30,34,40,.85)'; c.font = '500 30px Unbounded, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      const txt = 'NH35A · TWENTY-FOUR JEWELS · JAPAN';
+      arcText(c, txt, 512, 512, 512 * .345 / .43, -1.05, 2.1 / (txt.length - 1));
+      const ring = add(new THREE.RingGeometry(.11, .43, 96, 1, 0, Math.PI), new THREE.MeshStandardMaterial({ map: tex, transparent: true, metalness: .6, roughness: .5 }), 0, 0, .0135, rotor);
+      ring.userData.noShadow = true;
+    }
     const web = new THREE.Shape();
     web.moveTo(.44, 0); web.absarc(0, 0, .44, 0, Math.PI, false); web.lineTo(-.09, 0); web.absarc(0, 0, .09, Math.PI, 0, true); web.closePath();
     for (const a of [.55, Math.PI / 2, Math.PI - .55]) { const h = new THREE.Path(); h.absarc(Math.cos(a) * .27, Math.sin(a) * .27, .085, 0, TAU, true); web.holes.push(h); }
@@ -385,7 +417,7 @@ export function buildWatch(scene, opts = {}) {
   for (let i = 0; i < 6; i++) { const a = i * TAU / 6 + .26; cylZ(.022, .01, new THREE.MeshStandardMaterial({ color: 0x555a61, metalness: 1, roughness: .4 }), Math.cos(a) * .79, Math.sin(a) * .79, .062, cover, 6); }
 
   // детали отбрасывают тени друг на друга (кроме стёкол)
-  watch.traverse(o => { if (o.isMesh && o.material !== glassMat) o.castShadow = o.receiveShadow = true; });
+  watch.traverse(o => { if (o.isMesh && o.material !== glassMat && !o.userData.noShadow) o.castShadow = o.receiveShadow = true; });
 
   /* ── мягкая тень под часами ── */
   const shCv = makeCanvas(256);
@@ -434,5 +466,5 @@ export function buildWatch(scene, opts = {}) {
     V = v; drawDial(); drawBezel();
     orange.color.set(v.accent); brushed.color.set(v.metal[0]); polished.color.set(v.metal[1]); bezelMat.color.set(v.metal[1]);
   }
-  return { watch, update, parts, anchor, setVariant };
+  return { watch, update, parts, anchor, setVariant, setHands, setRotor };
 }
