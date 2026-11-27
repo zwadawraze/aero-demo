@@ -361,6 +361,8 @@
 
   @media (max-width: 760px) {
     #buildBtn { left: auto; right: var(--pad); transform: none; }
+    /* на телефоне часы в крупных планах доходят до верха экрана: шапка получает тёмную подложку, чтобы кнопки читались */
+    header { background: linear-gradient(rgba(10, 13, 17, .94), rgba(10, 13, 17, .8) 62%, rgba(10, 13, 17, 0)); padding-bottom: 30px; }
     .col { background: rgba(14, 18, 23, .74); border-left: 0; padding: 64px var(--pad) 84px; }
     #c-hero .giant { font-size: clamp(50px, 17vw, 90px); }
     #c-order .giant { font-size: 12vw; }
@@ -643,7 +645,7 @@ const WATCH = {
 
   style: 'dress', brand: 'ХроноКастом',
   backText: 'AUTOMATIC  ·  MECHANICAL MOVEMENT  ·  SAPPHIRE CRYSTAL  ·  10 ATM  ·  STAINLESS STEEL 316L  ·  ',
-  partMats: ['сапфировое', 'сталь 316L, полировка', 'полированная сталь, синёная секундная', 'металл, объёмная фактура', 'сталь 316L, 40 мм', 'Seiko NH35, автоподзавод', 'сталь и прозрачное стекло', 'сталь 316L, три ряда звеньев'],
+  partMats: ['сапфировое', 'сталь 316L, сатинировка', 'полированная сталь, синёная секундная', 'металл, объёмная фактура', 'сталь 316L, 40 мм', 'Seiko NH35, автоподзавод', 'сталь и прозрачное стекло', 'сталь 316L, три ряда звеньев'],
 };
 const { watch, update: updateWatch, parts, anchor, setVariant, setHands, setRotor } = buildWatch(scene, WATCH);
 
@@ -658,7 +660,7 @@ function chipRow(id, names, apply) {
   pick(0);
 }
 chipRow('handsRow', ['Дофин', 'Меч', 'Лист'], setHands);
-chipRow('rotorRow', ['Розовый', 'Сталь', 'Золото', 'Синий'], setRotor);
+chipRow('rotorRow', OLD ? ['Розовый', 'Сталь', 'Золото', 'Синий'] : ['Бронза', 'Сталь', 'Фиолетовый', 'Золото'], setRotor);
 const buildBtn = document.getElementById('buildBtn'), buildPanel = document.getElementById('buildPanel');
 let building = false, lift = 0;      // пока конструктор открыт, часы подняты над карточкой, а подписи деталей скрыты
 function setBuild(open) {
@@ -678,7 +680,7 @@ buildBtn.addEventListener('click', () => {
 // Мастер собирает часы под заказ и подбирает цвет циферблата — три варианта показывают, как это выглядело бы на одной модели
 const VARIANTS = [
   { name: 'Белая берёза', dial: ['#fdfdfb', '#f1f1ed', '#dcdcd7'], ink: '#2a2d31', bezel: '#0c0e11', accent: '#8fb4ff', metal: [0xe2e5e9, 0xf4f6f8], sw: ['#d5d8dc', '#f4f4f0'] },
-  { name: 'Синий лёд',    dial: ['#d6e8f5', '#a3c8e2', '#739fc0'], ink: '#16324a', bezel: '#0c0e11', accent: '#7cc4f0', metal: [0xe2e5e9, 0xf4f6f8], sw: ['#d5d8dc', '#8fbcd9'] },
+  { name: 'Зелёная берёза', dial: ['#46a878', '#2f8f62', '#1f7550'], ink: '#f2f6f3', bezel: '#0c0e11', accent: '#7cc4f0', metal: [0xe2e5e9, 0xf4f6f8], sw: ['#d5d8dc', '#2f8f62'] },
   { name: 'Ночь',         dial: ['#3b4149', '#1b1e22', '#0a0b0d'], ink: '#f0f0f0', bezel: '#0c0e11', accent: '#c9a45c', metal: [0xe2e5e9, 0xf4f6f8], sw: ['#d5d8dc', '#1b1e22'] },
 ];
 const colorsEl = document.getElementById('colors'), colorName = document.createElement('span');
@@ -826,8 +828,10 @@ function frame(ms) {
   // когда часы стоят сбоку от текста, на нешироком окне они уменьшаются, чтобы не закрывать рассказ
   const tight = Math.min(1, camera.aspect / 1.6), room = lerp(1, tight, Math.min(1, Math.abs(lerp(a.x, b.x, f)) / 1.7) * narrow);   // на телефоне часы стоят над текстом, ужимать не нужно
   watch.position.x = lerp(a.x, b.x, f) * narrow * tight;
-  watch.position.y = lerp(a.y, b.y, f) + Math.sin(t * .9) * .05 * float + (1 - narrow) * (.45 + .62 * Math.min(1, Math.abs(lerp(a.x, b.x, f)) / 1.7));
-  watch.scale.setScalar(lerp(a.s, b.s, f) * fit * room);
+  watch.position.y = lerp(a.y, b.y, f) + Math.sin(t * .9) * .05 * float + (1 - narrow) * (.45 + .5 * Math.min(1, Math.abs(lerp(a.x, b.x, f)) / 1.7));
+  // на телефоне крупные планы чуть меньше, чтобы браслет не заходил под кнопки в шапке
+  const phone = lerp(1, .8, (1 - narrow) * Math.min(1, Math.abs(lerp(a.x, b.x, f)) / 1.7));
+  watch.scale.setScalar(lerp(a.s, b.s, f) * fit * room * phone);
   watch.rotation.x = lerp(a.rx, b.rx, f) + mouse.sy * .1 + Math.sin(t * .7) * .025 * float + drag.rx;
   watch.rotation.y = lerp(a.ry, b.ry, f) + mouse.sx * .16 + Math.sin(t * .5) * .06 * float + drag.ry;
   watch.rotation.z = lerp(a.rz, b.rz, f);
