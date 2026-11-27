@@ -28,7 +28,9 @@ function arcText(c, text, cx, cy, r, start, step) {
   });
 }
 
-export function buildWatch(scene) {
+// opts.style: 'chrono' (по умолчанию) — хронограф со шкалой на безеле; 'dress' — трёхстрелочник с гладким безелем и фактурным циферблатом
+export function buildWatch(scene, opts = {}) {
+  const dress = opts.style === 'dress', brand = opts.brand || 'AERO';
   /* ── текстуры ── */
   // сатинировка: тонкие штрихи в карте шероховатости
   const brushCv = makeCanvas(256);
@@ -49,6 +51,8 @@ export function buildWatch(scene) {
   const polished = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, metalness: 1, roughness: .1, envMapIntensity: 2.1, side: THREE.DoubleSide });
   const gold     = new THREE.MeshStandardMaterial({ color: 0xe3b862, metalness: 1, roughness: .3, envMapIntensity: 1.9, side: THREE.DoubleSide });
   const blued    = new THREE.MeshStandardMaterial({ color: 0x2a3fa0, metalness: 1, roughness: .25, envMapIntensity: 2 });
+  const bezelMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: .3, envMapIntensity: 2.6, side: THREE.DoubleSide });   // гладкий безель: мягче полировки, чтобы не уходил в чёрное
+  const rose     = new THREE.MeshStandardMaterial({ color: 0xcf9274, metalness: 1, roughness: .32, envMapIntensity: 1.9, side: THREE.DoubleSide });
   const ruby     = new THREE.MeshStandardMaterial({ color: 0xd01945, metalness: 0, roughness: .08, emissive: 0x52000f });
   const orange   = new THREE.MeshStandardMaterial({ color: 0xff5a1f, metalness: .2, roughness: .4 });
   const lume     = new THREE.MeshStandardMaterial({ color: 0xf2fff4, emissive: 0x8dffc0, emissiveIntensity: .3, roughness: .7 });
@@ -73,8 +77,8 @@ export function buildWatch(scene) {
   lathe([[.62, -.2], [.82, -.2], [.955, -.14], [1, -.06], [1, .05]], brushed);
   lathe([[1, .05], [.975, .1], [.955, .115]], polished);                                   // полированная фаска
   cur = L.bezel;
-  add(extrude(gearShape(.968, .946, 90, .9), .085), polished, 0, 0, .115);                 // рифлёный край безеля
-  lathe([[.957, .2], [.935, .224]], polished);
+  if (!dress) add(extrude(gearShape(.968, .946, 90, .9), .085), polished, 0, 0, .115);     // рифлёный край безеля
+  lathe(dress ? [[.957, .115], [.967, .165], [.94, .214], [.85, .234], [.8, .224]] : [[.957, .2], [.935, .224]], dress ? bezelMat : polished);   // у «dress» — гладкий полированный безель
   lathe([[.8, .224], [.795, .2], [.795, .1]], polished);                                   // внутренняя стенка
 
   // керамическая вставка безеля со шкалой
@@ -98,12 +102,44 @@ export function buildWatch(scene) {
     c.restore(); bezelTex.needsUpdate = true;
   }
   drawBezel();
-  add(new THREE.RingGeometry(.8, .936, 128), new THREE.MeshStandardMaterial({ map: bezelTex, metalness: .15, roughness: .2, envMapIntensity: 1.4 }), 0, 0, .2245);
+  if (!dress) add(new THREE.RingGeometry(.8, .936, 128), new THREE.MeshStandardMaterial({ map: bezelTex, metalness: .15, roughness: .2, envMapIntensity: 1.4 }), 0, 0, .2245);
 
   /* ── циферблат ── */
   const dialCv = makeCanvas(1024), dialTex = colorTex(dialCv);
   const SUB = [[-.36, 0], [.36, 0], [0, -.36]], SUB_R = .2;      // субциферблаты на 9, 3 и 6
+  // циферблат «dress»: светлая фактура из длинных неровных борозд, окно даты на «3», без счётчиков
+  function drawTextured() {
+    const c = dialCv.getContext('2d'), R = 512, K = 640, ink = V.ink || '#2a2d31', darkDial = /^#[c-f]/i.test(ink);
+    const g = c.createRadialGradient(R, R * .8, 40, R, R, R);
+    g.addColorStop(0, V.dial[0]); g.addColorStop(.7, V.dial[1]); g.addColorStop(1, V.dial[2]);
+    c.globalAlpha = 1; c.fillStyle = g; c.fillRect(0, 0, 1024, 1024);
+    c.lineCap = 'round';
+    for (let i = 0; i < 3600; i++) {
+      const x = Math.random() * 1024, y = Math.random() * 1024, len = 60 + Math.random() * 320, w = (Math.random() - .5) * 30;
+      c.strokeStyle = Math.random() > .5
+        ? `rgba(255,255,255,${(darkDial ? .06 : .4) + Math.random() * (darkDial ? .12 : .5)})`
+        : `rgba(20,24,30,${(darkDial ? .15 : .09) + Math.random() * (darkDial ? .3 : .2)})`;
+      c.lineWidth = 1.2 + Math.random() * 3.4;
+      c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + w, y + len / 2, x + w * .3, y + len); c.stroke();
+    }
+    c.save(); c.translate(R, R);
+    for (let i = 0; i < 60; i++) {
+      c.save(); c.rotate(i * TAU / 60); c.fillStyle = ink; c.globalAlpha = i % 5 ? .55 : .9;
+      c.fillRect(i % 5 ? -1.5 : -2.5, -500, i % 5 ? 3 : 5, i % 5 ? 20 : 30); c.restore();
+    }
+    c.save(); c.translate(.59 * K, 0);                            // окно даты
+    c.fillStyle = '#9aa0a7'; c.beginPath(); c.roundRect(-46, -34, 92, 68, 6); c.fill();
+    c.fillStyle = '#fbfbf7'; c.beginPath(); c.roundRect(-40, -28, 80, 56, 3); c.fill();
+    c.fillStyle = '#16181b'; c.font = '500 38px Unbounded, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(String(new Date().getDate()), 0, 2);
+    c.restore();
+    c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = ink;
+    c.font = '500 30px Unbounded, Arial, sans-serif'; c.fillText(brand.toUpperCase(), 0, -196);
+    c.font = '300 17px "JetBrains Mono", monospace'; c.globalAlpha = .75; c.fillText('A U T O M A T I C', 0, 172);
+    c.restore(); c.globalAlpha = 1; dialTex.needsUpdate = true;
+  }
   function drawDial() {
+    if (dress) return drawTextured();
     const c = dialCv.getContext('2d'), R = 512, K = 640;         // K — пикселей на единицу модели
     const g = c.createRadialGradient(R, R * .75, 30, R, R, R);
     g.addColorStop(0, V.dial[0]); g.addColorStop(.65, V.dial[1]); g.addColorStop(1, V.dial[2]);
@@ -157,7 +193,7 @@ export function buildWatch(scene) {
     }
     // надписи
     c.textAlign = 'center'; c.textBaseline = 'alphabetic';
-    c.fillStyle = '#fff'; c.font = '500 50px Unbounded, Arial, sans-serif'; c.fillText('AERO', 0, -200);
+    c.fillStyle = '#fff'; c.font = '500 50px Unbounded, Arial, sans-serif'; c.fillText(brand, 0, -200);
     c.fillStyle = 'rgba(255,255,255,.7)'; c.font = '300 17px "JetBrains Mono", monospace'; c.fillText('A U T O M A T I C', 0, -166);
     c.fillStyle = V.accent; c.fillText('C H R O N O G R A P H', 0, -140);
     c.restore(); dialTex.needsUpdate = true;
@@ -167,16 +203,17 @@ export function buildWatch(scene) {
   cur = L.dial;
   cylZ(.79, .04, brass, 0, 0, .088, undefined, 96);                                        // латунная основа циферблата
   for (const [x, y] of [[.5, .35], [-.5, -.35]]) cylZ(.025, .09, brass, x, y, .03);         // ножки циферблата
-  add(new THREE.CircleGeometry(.8, 128), new THREE.MeshStandardMaterial({ map: dialTex, metalness: .6, roughness: .4, envMapIntensity: 1.2 }), 0, 0, .11);
+  add(new THREE.CircleGeometry(.8, 128), new THREE.MeshStandardMaterial({ map: dialTex, metalness: dress ? .2 : .6, roughness: dress ? .6 : .4, envMapIntensity: dress ? .8 : 1.2 }), 0, 0, .11);
 
-  // накладные метки с люмом
+  // накладные метки: у хронографа с люмом, у «dress» — широкие полированные, без метки на месте даты
   for (let i = 0; i < 12; i++) {
-    const a = i * TAU / 12, short = i && i % 3 === 0, r = short ? .7 : .645, len = short ? .07 : .15;
+    if (dress && i === 3) continue;
+    const a = i * TAU / 12, short = !dress && i && i % 3 === 0, r = short ? .7 : dress ? .605 : .645, len = short ? .07 : dress ? .17 : .15;
     const g = new THREE.Group(); g.position.set(Math.sin(a) * r, Math.cos(a) * r, .11); g.rotation.z = -a; cur.add(g);
-    const bars = i === 0 ? [-.036, .036] : [0];
+    const bars = i === 0 ? (dress ? [-.044, .044] : [-.036, .036]) : [0];
     for (const bx of bars) {
-      add(new RoundedBoxGeometry(.052, len, .032, 2, .008), polished, bx, 0, .016, g);
-      add(new THREE.BoxGeometry(.028, len - .035, .004), lume, bx, 0, .034, g);
+      add(new RoundedBoxGeometry(dress ? .066 : .052, len, dress ? .04 : .032, 2, .008), polished, bx, 0, dress ? .02 : .016, g);
+      if (!dress) add(new THREE.BoxGeometry(.028, len - .035, .004), lume, bx, 0, .034, g);
     }
   }
 
@@ -185,18 +222,20 @@ export function buildWatch(scene) {
   const makeHand = (pts, lumeW, lumeFrom, lumeTo, z) => {
     const g = new THREE.Group(); g.position.z = z; cur.add(g);
     add(extrude(poly(pts), .008, .003), polished, 0, 0, 0, g);
-    add(new THREE.BoxGeometry(lumeW, lumeTo - lumeFrom, .004), lume, 0, (lumeFrom + lumeTo) / 2, .013, g);
+    if (!dress) add(new THREE.BoxGeometry(lumeW, lumeTo - lumeFrom, .004), lume, 0, (lumeFrom + lumeTo) / 2, .013, g);
     return g;
   };
-  const hHand = makeHand([[-.03, -.09], [.03, -.09], [.046, .3], [0, .43], [-.046, .3]], .042, .1, .29, .148);
-  const mHand = makeHand([[-.024, -.09], [.024, -.09], [.036, .54], [0, .7], [-.036, .54]], .032, .14, .52, .166);
+  // у «dress» стрелки гранёные «дофин» без люма, секундная — синёная
+  const hHand = makeHand(dress ? [[-.012, -.08], [.012, -.08], [.052, .13], [0, .42], [-.052, .13]] : [[-.03, -.09], [.03, -.09], [.046, .3], [0, .43], [-.046, .3]], .042, .1, .29, .148);
+  const mHand = makeHand(dress ? [[-.01, -.08], [.01, -.08], [.042, .17], [0, .69], [-.042, .17]] : [[-.024, -.09], [.024, -.09], [.036, .54], [0, .7], [-.036, .54]], .032, .14, .52, .166);
   const sHand = new THREE.Group(); sHand.position.z = .186; cur.add(sHand);
-  { const g = new THREE.BoxGeometry(.011, .98, .006); g.translate(0, .98 / 2 - .22, 0); add(g, orange, 0, 0, 0, sHand); }
-  cylZ(.036, .006, orange, 0, -.16, 0, sHand);
+  const secMat = dress ? blued : orange;
+  { const g = new THREE.BoxGeometry(dress ? .009 : .011, .98, .006); g.translate(0, .98 / 2 - .22, 0); add(g, secMat, 0, 0, 0, sHand); }
+  cylZ(dress ? .026 : .036, .006, secMat, 0, -.16, 0, sHand);
   cylZ(.052, .05, polished, 0, 0, .168);
-  cylZ(.024, .012, orange, 0, 0, .198);
+  cylZ(.024, .012, dress ? polished : orange, 0, 0, .198);
   // стрелки субциферблатов
-  const subHands = SUB.map(([x, y]) => {
+  const subHands = (dress ? [] : SUB).map(([x, y]) => {
     const g = new THREE.Group(); g.position.set(x, y, .118); cur.add(g);
     add(extrude(poly([[-.012, -.03], [.012, -.03], [.005, .15], [-.005, .15]]), .004), polished, 0, 0, 0, g);
     cylZ(.02, .008, polished, 0, 0, .004, g);
@@ -213,8 +252,8 @@ export function buildWatch(scene) {
   const crown = add(extrude(gearShape(.105, .092, 22), .13), polished, 1.035, 0, -.03); crown.rotation.y = Math.PI / 2;
   { const m = add(new THREE.CylinderGeometry(.06, .06, .06, 24), brushed, 1.01, 0, -.03); m.rotation.z = Math.PI / 2; }
   { const m = add(new THREE.CylinderGeometry(.09, .078, .025, 24), polished, 1.178, 0, -.03); m.rotation.z = -Math.PI / 2; }
-  { const m = add(new THREE.CylinderGeometry(.03, .03, .01, 16), orange, 1.193, 0, -.03); m.rotation.z = Math.PI / 2; }
-  for (const s of [-1, 1]) {
+  { const m = add(new THREE.CylinderGeometry(.03, .03, .01, 16), dress ? polished : orange, 1.193, 0, -.03); m.rotation.z = Math.PI / 2; }
+  for (const s of dress ? [] : [-1, 1]) {                                                            // у «dress» нет кнопок хронографа
     add(new RoundedBoxGeometry(.1, .1, .15, 2, .03), brushed, .985, s * .165, -.03);                   // защита головки
     const p = new THREE.Group(); p.rotation.z = s * .6; p.position.z = -.03; cur.add(p);                // кнопка
     let m = add(new THREE.CylinderGeometry(.078, .078, .06, 24), brushed, 1.0, 0, 0, p); m.rotation.z = Math.PI / 2;
@@ -242,6 +281,7 @@ export function buildWatch(scene) {
     for (let i = 1; i <= N; i++) { const q = pt(phi0 + (phi1 - phi0) * i / N); cum.push(cum[i - 1] + Math.hypot(q[0] - prev[0], q[1] - prev[1])); prev = q; }
     const L = cum[N], rows = Math.round(L / .27), pitch = L / rows, len = pitch - .022;
     const gMid = new RoundedBoxGeometry(.25, len, .11, 3, .035), gIn = new RoundedBoxGeometry(.09, len * .82, .1, 3, .03), gOut = new RoundedBoxGeometry(.17, len, .115, 3, .035);
+    const g3Mid = new RoundedBoxGeometry(.33, len, .115, 3, .035), g3Out = new RoundedBoxGeometry(.235, len, .11, 3, .035);
     let j = 0;
     for (let k = 0; k < rows; k++) {
       const target = (k + .5) * pitch; while (cum[j] < target) j++;
@@ -249,8 +289,13 @@ export function buildWatch(scene) {
       const row = new THREE.Group(); row.position.set(0, y, z);
       row.rotation.x = Math.atan2(-B * Math.sin(p), A * Math.cos(p));
       row.scale.x = 1 - .15 * Math.sin(Math.PI * k / (rows - 1));                                       // сужение к застёжке
-      add(gMid, brushed, 0, 0, 0, row);
-      for (const s of [-1, 1]) { add(gIn, polished, s * .178, 0, 0, row); add(gOut, brushed, s * .316, 0, 0, row); }
+      if (dress) {                                                                                      // трёхрядный браслет
+        add(g3Mid, brushed, 0, 0, 0, row);
+        for (const s of [-1, 1]) add(g3Out, brushed, s * .292, 0, 0, row);
+      } else {
+        add(gMid, brushed, 0, 0, 0, row);
+        for (const s of [-1, 1]) { add(gIn, polished, s * .178, 0, 0, row); add(gOut, brushed, s * .316, 0, 0, row); }
+      }
       (y >= 0 ? strapTop : strapBot).add(row);
     }
     // концевые звенья между ушками
@@ -314,7 +359,7 @@ export function buildWatch(scene) {
   {
     const s = new THREE.Shape();
     s.moveTo(.56, 0); s.absarc(0, 0, .56, 0, Math.PI, false); s.lineTo(-.44, 0); s.absarc(0, 0, .44, Math.PI, 0, true); s.closePath();
-    add(extrude(s, .022, .004), gold, 0, 0, 0, rotor);                                                  // тяжёлый сегмент
+    add(extrude(s, .022, .004), dress ? rose : gold, 0, 0, 0, rotor);                                   // тяжёлый сегмент
     const web = new THREE.Shape();
     web.moveTo(.44, 0); web.absarc(0, 0, .44, 0, Math.PI, false); web.lineTo(-.09, 0); web.absarc(0, 0, .09, Math.PI, 0, true); web.closePath();
     for (const a of [.55, Math.PI / 2, Math.PI - .55]) { const h = new THREE.Path(); h.absarc(Math.cos(a) * .27, Math.sin(a) * .27, .085, 0, TAU, true); web.holes.push(h); }
@@ -331,7 +376,7 @@ export function buildWatch(scene) {
     // редкие мягкие круговые штрихи: частые тонкие линии рябили при движении
     for (let r = 300; r < 520; r += 5) { const v = Math.random() > .5 ? 255 : 120; c.strokeStyle = `rgba(${v},${v},${v},.07)`; c.lineWidth = 3; c.beginPath(); c.arc(R, R, r, 0, TAU); c.stroke(); }
     c.fillStyle = '#3a3f46'; c.font = '400 30px Unbounded, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    const text = 'AERO—41  ·  STAINLESS STEEL 316L  ·  SAPPHIRE CRYSTAL  ·  10 ATM  ·  № 041/500  ·  ';
+    const text = opts.backText || 'AERO—41  ·  STAINLESS STEEL 316L  ·  SAPPHIRE CRYSTAL  ·  10 ATM  ·  № 041/500  ·  ';
     arcText(c, text, R, R, 443, 0, TAU / text.length);
     backTex.needsUpdate = true;
   }
@@ -359,6 +404,7 @@ export function buildWatch(scene) {
     { name: 'Задняя крышка',  mat: 'сталь и сапфировое стекло',        r: .82, z: -.21, off: -3.1 },
     { name: 'Браслет',        mat: 'сталь 316L, пять рядов звеньев',   r: 1.75, z: -1.1, off: 0, oy: STRAP_OY },
   ];
+  (opts.partMats || []).forEach((m, i) => { if (m && parts[i]) parts[i].mat = m; });   // свои подписи материалов для конкретных часов
   let ex = 0;                                                    // 0 — собраны, 1 — разобраны
   const anchor = (i, side, v) => { const p = parts[i]; v.set(0, side * (p.r + (p.oy || 0) * ex), p.z + p.off * ex); return watch.localToWorld(v); };
 
@@ -369,9 +415,11 @@ export function buildWatch(scene) {
     back.rotation.y = Math.PI * (1 - turn); back.scale.setScalar(1 + .25 * turn);
     const d = new Date(), s = d.getSeconds() + d.getMilliseconds() / 1000, m = d.getMinutes() + s / 60, h = d.getHours() % 12 + m / 60;
     sHand.rotation.z = -s / 60 * TAU; mHand.rotation.z = -m / 60 * TAU; hHand.rotation.z = -h / 12 * TAU;
-    subHands[0].rotation.z = -Math.floor(t * 2) / 2 / 60 * TAU * 6;     // бегущая секундная, шагами как у механики
-    subHands[1].rotation.z = -m / 30 * TAU;
-    subHands[2].rotation.z = -h / 12 * TAU;
+    if (subHands.length) {
+      subHands[0].rotation.z = -Math.floor(t * 2) / 2 / 60 * TAU * 6;   // бегущая секундная, шагами как у механики
+      subHands[1].rotation.z = -m / 30 * TAU;
+      subHands[2].rotation.z = -h / 12 * TAU;
+    }
     rotor.rotation.z = t * .45 + Math.sin(t * .8) * .9;
     balance.rotation.z = Math.sin(t * 14) * 1.1;
     for (const g of gears) g.rotation.z = t * .25 * g.userData.speed;
@@ -384,7 +432,7 @@ export function buildWatch(scene) {
   // смена расцветки: перерисовать циферблат и безель, перекрасить металл и акцент
   function setVariant(v) {
     V = v; drawDial(); drawBezel();
-    orange.color.set(v.accent); brushed.color.set(v.metal[0]); polished.color.set(v.metal[1]);
+    orange.color.set(v.accent); brushed.color.set(v.metal[0]); polished.color.set(v.metal[1]); bezelMat.color.set(v.metal[1]);
   }
   return { watch, update, parts, anchor, setVariant };
 }
