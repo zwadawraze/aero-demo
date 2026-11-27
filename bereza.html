@@ -327,7 +327,39 @@
   .hero-facts b { font-family: var(--display); font-weight: 300; font-style: italic; font-size: clamp(28px, 3vw, 46px); letter-spacing: 0; text-transform: none; color: var(--ink); }
   #c-order .giant { font-size: clamp(44px, 10vw, 200px); font-style: italic; }
 
+  /* конструктор: кнопка внизу по центру и карточка с выбором деталей */
+  #buildBtn {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 21;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em; background: rgba(16, 21, 27, .6);
+  }
+  #buildBtn:hover, #buildBtn[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  #buildPanel {
+    position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); z-index: 21;
+    width: min(440px, calc(100vw - 28px)); padding: 10px 20px 14px;
+    border: 1px solid var(--line); border-radius: 14px;
+    background: rgba(13, 17, 22, .84); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    font-family: var(--mono);
+  }
+  #buildPanel[hidden] { display: none; }
+  .brow {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0;
+    border-bottom: 1px solid var(--line); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--soft);
+  }
+  #buildPanel .colors { position: static; transform: none; }
+  #buildPanel .colors span { min-width: 0; margin-left: 4px; color: var(--ink); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .chips button {
+    font: inherit; letter-spacing: .06em; text-transform: none; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; cursor: pointer; transition: background .25s, color .25s;
+  }
+  .chips button:hover { border-color: var(--ink); }
+  .chips button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .bnote { margin-top: 10px; font-size: 11px; line-height: 1.5; color: var(--mute); letter-spacing: .02em; }
+  body.building #parts { opacity: 0; transition: opacity .3s; }
+  body.building .hint, body.building .counter { opacity: 0 !important; }
+
   @media (max-width: 760px) {
+    #buildBtn { left: auto; right: var(--pad); transform: none; }
     .col { background: rgba(14, 18, 23, .74); border-left: 0; padding: 64px var(--pad) 84px; }
     #c-hero .giant { font-size: clamp(50px, 17vw, 90px); }
     #c-order .giant { font-size: 12vw; }
@@ -360,7 +392,14 @@
 </header>
 
 <div class="counter"><span id="num">01</span><span class="bar"><b id="bar"></b></span><span id="total">08</span></div>
-<div class="colors" id="colors" role="group" aria-label="Расцветка часов"></div>
+<!-- Конструктор: покупатель разбирает часы и меняет детали из библиотеки -->
+<button class="xbtn" id="buildBtn" type="button" aria-expanded="false" aria-pressed="false">Конструктор</button>
+<div id="buildPanel" hidden>
+  <div class="brow"><span>Циферблат</span><div class="colors" id="colors" role="group" aria-label="Циферблат"></div></div>
+  <div class="brow"><span>Стрелки</span><div class="chips" id="handsRow" role="group" aria-label="Стрелки"></div></div>
+  <div class="brow"><span>Ротор</span><div class="chips" id="rotorRow" role="group" aria-label="Ротор"></div></div>
+  <p class="bnote">Здесь по три-четыре варианта для примера. В рабочей версии это ваша библиотека деталей.</p>
+</div>
 <div class="hint" id="hint">Листайте — расскажу о часах ↓</div>
 <nav id="rail" aria-label="Главы"></nav>
 
@@ -597,7 +636,34 @@ const WATCH = {
   backText: 'AUTOMATIC  ·  MECHANICAL MOVEMENT  ·  SAPPHIRE CRYSTAL  ·  10 ATM  ·  STAINLESS STEEL 316L  ·  ',
   partMats: ['сапфировое', 'сталь 316L, полировка', 'полированная сталь, синёная секундная', 'металл, объёмная фактура', 'сталь 316L, 40 мм', 'Seiko NH35, автоподзавод', 'сталь и прозрачное стекло', 'сталь 316L, три ряда звеньев'],
 };
-const { watch, update: updateWatch, parts, anchor, setVariant } = buildWatch(scene, WATCH);
+const { watch, update: updateWatch, parts, anchor, setVariant, setHands, setRotor } = buildWatch(scene, WATCH);
+
+/* ── конструктор: стрелки и ротор из библиотеки; при открытии часы разбираются, чтобы детали было видно ── */
+function chipRow(id, names, apply) {
+  const el = document.getElementById(id);
+  const btns = names.map((n, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = n;
+    b.addEventListener('click', () => pick(i)); el.append(b); return b;
+  });
+  const pick = i => { apply(i); btns.forEach((b, j) => b.setAttribute('aria-pressed', j === i)); };
+  pick(0);
+}
+chipRow('handsRow', ['Дофин', 'Меч', 'Лист'], setHands);
+chipRow('rotorRow', ['Розовый', 'Сталь', 'Золото', 'Синий'], setRotor);
+const buildBtn = document.getElementById('buildBtn'), buildPanel = document.getElementById('buildPanel');
+let building = false, lift = 0;      // пока конструктор открыт, часы подняты над карточкой, а подписи деталей скрыты
+function setBuild(open) {
+  building = open;
+  buildPanel.hidden = !open; buildBtn.setAttribute('aria-expanded', open); buildBtn.setAttribute('aria-pressed', open);
+  buildBtn.textContent = open ? 'Закрыть' : 'Конструктор';
+  document.body.classList.toggle('building', open);
+}
+function closeBuild() { if (building) setBuild(false); }
+buildBtn.addEventListener('click', () => {
+  const open = !building;
+  setBuild(open);
+  if (open !== exploded) setExploded(open);
+});
 
 /* ── расцветки ── */
 // Мастер собирает часы под заказ и подбирает цвет циферблата — три варианта показывают, как это выглядело бы на одной модели
@@ -687,7 +753,7 @@ addEventListener('pointermove', e => { mouse.x = e.clientX / vw * 2 - 1; mouse.y
 /* ── вращение перетаскиванием: зажать и тянуть, после отпускания — инерция ── */
 const drag = { on: false, x: 0, y: 0, rx: 0, ry: 0, vx: 0, vy: 0 };
 addEventListener('pointerdown', e => {
-  if (e.button !== 0 || e.target.closest('a, button')) return;
+  if (e.button !== 0 || e.target.closest('a, button, #buildPanel')) return;
   drag.on = true; drag.reset = false; drag.x = e.clientX; drag.y = e.clientY; drag.vx = drag.vy = 0;
   document.body.classList.add('dragging');
 });
@@ -710,6 +776,7 @@ function setExploded(v) {
   exploded = v; spAt = sp;
   document.body.classList.toggle('exploded', v);
   exBtn.textContent = v ? 'Собрать' : 'Разобрать'; exBtn.setAttribute('aria-pressed', v);
+  if (!v) closeBuild();
   drag.reset = true; drag.vx = drag.vy = 0;          // сбросить ручной поворот, чтобы слои встали в ряд
 }
 exBtn.addEventListener('click', () => setExploded(!exploded));
@@ -760,8 +827,9 @@ function frame(ms) {
   if (E > .001) {
     const k = E * E * (3 - 2 * E), baseRy = lerp(a.ry, b.ry, f);
     watch.position.x = lerp(watch.position.x, -.35 * fit, k);   // сдвиг влево: сзади деталей больше, чем спереди
-    watch.position.y = lerp(watch.position.y, .05, k);
-    watch.scale.setScalar(lerp(watch.scale.x, .7 * fit, k));
+    lift += ((building ? 1 : 0) - lift) * .08;
+    watch.position.y = lerp(watch.position.y, .05 + .85 * lift, k);
+    watch.scale.setScalar(lerp(watch.scale.x, (.7 - .1 * lift) * fit, k));
     watch.rotation.y += Math.atan2(Math.sin(-.9 - baseRy), Math.cos(-.9 - baseRy)) * k;
     watch.rotation.x += (.3 - lerp(a.rx, b.rx, f)) * k;        // лёгкий вид сверху: видна толщина деталей
     watch.rotation.z *= 1 - k;
