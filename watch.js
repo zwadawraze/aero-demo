@@ -99,7 +99,7 @@ export function buildWatch(scene, opts = {}) {
   lathe([[.62, -.2], [.82, -.2], [.955, -.14], [1, -.06], [1, .05]], brushed);
   lathe([[1, .05], [.975, .1], [.955, .115]], polished);                                   // полированная фаска
   cur = L.bezel;
-  if (!dress) add(extrude(gearShape(.968, .946, 90, .9), .085), polished, 0, 0, .115);     // рифлёный край безеля
+  if (!dress) add(extrude(gearShape(.968, fine ? .954 : .946, fine ? 150 : 90, .9), .085), polished, 0, 0, .115);     // рифлёный край безеля
   lathe(dress ? [[.957, .115], [.967, .165], [.94, .214], [.85, .234], [.8, .224]] : [[.957, .2], [.935, .224]], dress ? bezelMat : polished);   // у «dress» — гладкий полированный безель
   lathe([[.8, .224], [.795, .2], [.795, .1]], polished);                                   // внутренняя стенка
 
@@ -125,7 +125,7 @@ export function buildWatch(scene, opts = {}) {
     c.restore(); bezelTex.needsUpdate = true;
   }
   drawBezel();
-  if (!dress) add(new THREE.RingGeometry(.8, .936, 128), new THREE.MeshStandardMaterial({ map: bezelTex, metalness: .15, roughness: .2, envMapIntensity: 1.4 }), 0, 0, .2245);
+  if (!dress) add(new THREE.RingGeometry(.8, .936, 128), new THREE.MeshStandardMaterial({ map: bezelTex, metalness: .15, roughness: fine ? .07 : .2, envMapIntensity: 1.4 }), 0, 0, .2245);
 
   /* ── циферблат ── */
   const dialCv = makeCanvas(1024), dialTex = colorTex(dialCv);
@@ -250,7 +250,7 @@ export function buildWatch(scene, opts = {}) {
   cur = L.dial;
   cylZ(.79, .04, brass, 0, 0, .088, undefined, 96);                                        // латунная основа циферблата
   for (const [x, y] of [[.5, .35], [-.5, -.35]]) cylZ(.025, .09, brass, x, y, .03);         // ножки циферблата
-  add(new THREE.CircleGeometry(.8, 128), new THREE.MeshStandardMaterial({ map: dialTex, metalness: dress ? .3 : .6, roughness: dress ? .5 : .4, envMapIntensity: dress ? 1.4 : 1.2, bumpMap: dress ? dialTex : null, bumpScale: 4 }), 0, 0, .11);
+  add(new THREE.CircleGeometry(.8, 128), new THREE.MeshStandardMaterial({ map: dialTex, metalness: dress ? .3 : diver && fine ? .2 : .6, roughness: dress ? .5 : diver && fine ? .18 : .4, envMapIntensity: dress ? 1.4 : 1.2, bumpMap: dress ? dialTex : null, bumpScale: 4 }), 0, 0, .11);
 
   // накладные метки: у хронографа с люмом, у «dress» — широкие полированные, без метки на месте даты
   for (let i = 0; i < 12; i++) {
@@ -306,12 +306,17 @@ export function buildWatch(scene, opts = {}) {
 
   // сапфировое стекло
   cylZ(.794, .05, glassMat, 0, 0, .236, L.glass, 96);                                      // толстое «коробчатое» стекло
-  add(new THREE.TorusGeometry(.782, .013, 8, 96), rubber, 0, 0, .209, L.glass);            // уплотнитель
+  add(new THREE.TorusGeometry(.782, .013, 8, 96), rubber, 0, 0, .209, L.glass);
+  if (fine) {   // выпуклое стекло с бликом софтбокса и линза над датой — главные признаки «настоящих» часов на фото
+    const R = 8, cap = add(new THREE.SphereGeometry(R, 64, 10, 0, TAU, 0, Math.asin(.79 / R)), new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: .03, transparent: true, opacity: .2, blending: THREE.AdditiveBlending, depthWrite: false, envMapIntensity: 1.5 }), 0, 0, .276 - R, L.glass);
+    cap.rotation.x = Math.PI / 2; cap.userData.noShadow = true;
+    if (diver) { const lens = add(new THREE.SphereGeometry(.105, 32, 16), new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, opacity: .22, roughness: 0, metalness: 0, clearcoat: 1, envMapIntensity: 2.4 }), .6, 0, .262, L.glass); lens.scale.set(1, .78, .22); lens.userData.noShadow = true; }
+  }            // уплотнитель
   cylZ(.018, .15, polished, 0, 0, .1, L.hands, 16);                                        // ось стрелок
 
   /* ── головка, защита головки, кнопки хронографа ── */
   cur = L.body;
-  const crown = add(extrude(gearShape(.105, .092, 22), .13), polished, 1.035, 0, -.03); crown.rotation.y = Math.PI / 2;
+  const crown = add(extrude(gearShape(fine ? .1 : .105, .092, fine ? 40 : 22), .13), polished, 1.035, 0, -.03); crown.rotation.y = Math.PI / 2;
   { const m = add(new THREE.CylinderGeometry(.06, .06, .06, 24), brushed, 1.01, 0, -.03); m.rotation.z = Math.PI / 2; }
   { const m = add(new THREE.CylinderGeometry(.09, .078, .025, 24), polished, 1.178, 0, -.03); m.rotation.z = -Math.PI / 2; }
   { const m = add(new THREE.CylinderGeometry(.03, .03, .01, 16), dress ? polished : orange, 1.193, 0, -.03); m.rotation.z = Math.PI / 2; }
@@ -325,9 +330,15 @@ export function buildWatch(scene, opts = {}) {
   /* ── ушки ── */
   {
     const s = new THREE.Shape();
+    if (fine) {   // тонкие ушки: ниже, с плавным изгибом и широкой фаской, а не выступающие бруски
+      s.moveTo(.7, .05); s.lineTo(.9, .05); s.quadraticCurveTo(1.15, .028, 1.245, -.15);
+      s.lineTo(1.245, -.2); s.quadraticCurveTo(1.22, -.235, 1.12, -.225); s.lineTo(.7, -.2);
+    } else {
     s.moveTo(.7, .1); s.lineTo(.96, .1); s.quadraticCurveTo(1.2, .07, 1.27, -.13);
-    s.lineTo(1.27, -.19); s.quadraticCurveTo(1.25, -.235, 1.15, -.22); s.lineTo(.7, -.2); s.closePath();
-    const g = extrude(s, .2, .02); g.translate(0, 0, -.1);
+    s.lineTo(1.27, -.19); s.quadraticCurveTo(1.25, -.235, 1.15, -.22); s.lineTo(.7, -.2);
+    }
+    s.closePath();
+    const g = extrude(s, fine ? .12 : .2, fine ? .042 : .02); g.translate(0, 0, fine ? -.06 : -.1);
     g.applyMatrix4(new THREE.Matrix4().set(0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1));           // профиль (y,z), выдавливание по x
     for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
       const l = add(g, brushed, sx * .55, 0, 0); l.scale.y = sy;
@@ -341,9 +352,9 @@ export function buildWatch(scene, opts = {}) {
     const pt = p => [A * Math.sin(p), Z0 - B + B * Math.cos(p)];
     const cum = [0]; let prev = pt(phi0);
     for (let i = 1; i <= N; i++) { const q = pt(phi0 + (phi1 - phi0) * i / N); cum.push(cum[i - 1] + Math.hypot(q[0] - prev[0], q[1] - prev[1])); prev = q; }
-    const L = cum[N], rows = Math.round(L / .27), pitch = L / rows, len = pitch - (fine ? .005 : .022);
+    const L = cum[N], rows = Math.round(L / (fine ? .2 : .27)), pitch = L / rows, len = pitch - (fine ? .005 : .022);
     const gMid = new RoundedBoxGeometry(.25, len, .11, 3, .035), gIn = new RoundedBoxGeometry(.09, len * .82, .1, 3, .03), gOut = new RoundedBoxGeometry(.17, len, .115, 3, .035);
-    const g3Mid = new RoundedBoxGeometry(.33, len, .115, 3, .035), g3Out = new RoundedBoxGeometry(.235, len, .11, 3, .035);
+    const g3Mid = fine ? new RoundedBoxGeometry(.33, len, .1, 5, .048) : new RoundedBoxGeometry(.33, len, .115, 3, .035), g3Out = fine ? new RoundedBoxGeometry(.235, len, .094, 5, .045) : new RoundedBoxGeometry(.235, len, .11, 3, .035);   // у тонкой отделки звенья мельче и скруглённые
     let j = 0;
     for (let k = 0; k < rows; k++) {
       const target = (k + .5) * pitch; while (cum[j] < target) j++;
