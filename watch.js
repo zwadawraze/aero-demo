@@ -28,9 +28,31 @@ function arcText(c, text, cx, cy, r, start, step) {
   });
 }
 
+// Студийное окружение, как на предметной съёмке часов: тёмный зал и несколько ярких софтбоксов.
+// На металле это даёт узкие чёткие блики и глубокие тени вместо ровной «пластиковой» засветки.
+export function studioEnv(renderer) {
+  const s = new THREE.Scene();
+  s.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), new THREE.MeshBasicMaterial({ color: 0x0b0c0f, side: THREE.BackSide })));
+  const box = (w, h, x, y, z, power) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(power, power, power), side: THREE.DoubleSide, toneMapped: false }));
+    m.position.set(x, y, z); m.lookAt(0, 0, 0); s.add(m);
+  };
+  box(16, 7, 0, 11, 4, 1.9);      // большой верхний софтбокс
+  box(2.6, 14, -11, 2, 3, 3.2);     // узкая полоса слева — длинный блик по корпусу
+  box(2.6, 14, 11, 0, 5, 1.5);    // полоса справа, слабее
+  box(12, 6, 0, 2, 13, .28);      // заполняющий свет со стороны камеры
+  box(18, 10, 0, -10, 3, .16);     // отражение от стола снизу
+  box(5, 5, 6, 7, -9, 1.2);       // контровой сзади
+  const pm = new THREE.PMREMGenerator(renderer), tex = pm.fromScene(s, .015).texture;
+  pm.dispose(); return tex;
+}
+
 // opts.style: 'chrono' (по умолчанию) — хронограф со шкалой на безеле; 'dress' — трёхстрелочник с гладким безелем и фактурным циферблатом
 export function buildWatch(scene, opts = {}) {
-  const dress = opts.style === 'dress', brand = opts.brand || 'AERO';
+  const dress = opts.style === 'dress', diver = opts.style === 'diver', nh = dress || diver;
+  let brand = opts.brand ?? 'AERO';
+  const fine = !!opts.renderer;                              // «тонкая» отделка: студийный свет, плотный браслет, гранёные детали
+  if (fine) scene.environment = studioEnv(opts.renderer);
   /* ── текстуры ── */
   // сатинировка: тонкие штрихи в карте шероховатости
   const brushCv = makeCanvas(256);
@@ -86,6 +108,7 @@ export function buildWatch(scene, opts = {}) {
   function drawBezel() {
     const c = bezelCv.getContext('2d'), R = 512;
     c.fillStyle = V.bezel; c.fillRect(0, 0, 1024, 1024);
+    if (V.bezel2) { c.fillStyle = V.bezel2; c.fillRect(0, 512, 1024, 512); }
     c.save(); c.translate(R, R);
     for (let i = 0; i < 60; i++) {
       c.save(); c.rotate(i * TAU / 60);
@@ -138,8 +161,32 @@ export function buildWatch(scene, opts = {}) {
     c.font = '300 17px "JetBrains Mono", monospace'; c.globalAlpha = .75; c.fillText('A U T O M A T I C', 0, 172);
     c.restore(); c.globalAlpha = 1; dialTex.needsUpdate = true;
   }
+  // циферблат «diver»: гладкий, с минутной шкалой и окном даты; надпись — логотип заказчика или пусто
+  function drawDiver() {
+    const c = dialCv.getContext('2d'), R = 512, K = 640;
+    const g = c.createRadialGradient(R, R * .7, 30, R, R, R);
+    g.addColorStop(0, V.dial[0]); g.addColorStop(.6, V.dial[1]); g.addColorStop(1, V.dial[2]);
+    c.globalAlpha = 1; c.fillStyle = g; c.fillRect(0, 0, 1024, 1024);
+    c.save(); c.translate(R, R);
+    for (let i = 0; i < 60; i++) {
+      c.save(); c.rotate(i * TAU / 60); c.fillStyle = i % 5 ? 'rgba(255,255,255,.7)' : '#fff';
+      c.fillRect(i % 5 ? -1.5 : -3, -506, i % 5 ? 3 : 6, i % 5 ? 20 : 30); c.restore();
+    }
+    c.save(); c.translate(.6 * K, 0);
+    c.fillStyle = '#c9ced4'; c.beginPath(); c.roundRect(-46, -34, 92, 68, 6); c.fill();
+    c.fillStyle = '#f6f4ee'; c.beginPath(); c.roundRect(-40, -28, 80, 56, 3); c.fill();
+    c.fillStyle = '#111'; c.font = '500 38px Unbounded, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(String(new Date().getDate()), 0, 2);
+    c.restore();
+    c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = '#fff';
+    if (brand) { c.font = '500 40px Unbounded, Arial, sans-serif'; c.fillText(brand, 0, -186); }
+    c.font = '300 17px "JetBrains Mono", monospace'; c.fillStyle = 'rgba(255,255,255,.75)'; c.fillText('A U T O M A T I C', 0, 150);
+    c.fillStyle = V.accent; c.fillText('N H 3 5', 0, 178);
+    c.restore(); dialTex.needsUpdate = true;
+  }
   function drawDial() {
     if (dress) return drawTextured();
+    if (diver) return drawDiver();
     const c = dialCv.getContext('2d'), R = 512, K = 640;         // K — пикселей на единицу модели
     const g = c.createRadialGradient(R, R * .75, 30, R, R, R);
     g.addColorStop(0, V.dial[0]); g.addColorStop(.65, V.dial[1]); g.addColorStop(1, V.dial[2]);
@@ -203,16 +250,21 @@ export function buildWatch(scene, opts = {}) {
   cur = L.dial;
   cylZ(.79, .04, brass, 0, 0, .088, undefined, 96);                                        // латунная основа циферблата
   for (const [x, y] of [[.5, .35], [-.5, -.35]]) cylZ(.025, .09, brass, x, y, .03);         // ножки циферблата
-  add(new THREE.CircleGeometry(.8, 128), new THREE.MeshStandardMaterial({ map: dialTex, metalness: dress ? .2 : .6, roughness: dress ? .6 : .4, envMapIntensity: dress ? .8 : 1.2 }), 0, 0, .11);
+  add(new THREE.CircleGeometry(.8, 128), new THREE.MeshStandardMaterial({ map: dialTex, metalness: dress ? .3 : .6, roughness: dress ? .5 : .4, envMapIntensity: dress ? 1.4 : 1.2, bumpMap: dress ? dialTex : null, bumpScale: 4 }), 0, 0, .11);
 
   // накладные метки: у хронографа с люмом, у «dress» — широкие полированные, без метки на месте даты
   for (let i = 0; i < 12; i++) {
-    if (dress && i === 3) continue;
-    const a = i * TAU / 12, short = !dress && i && i % 3 === 0, r = short ? .7 : dress ? .605 : .645, len = short ? .07 : dress ? .17 : .15;
+    if (nh && i === 3) continue;
+    const a = i * TAU / 12, short = !nh && i && i % 3 === 0, r = short ? .7 : dress ? .605 : .645, len = short ? .07 : dress ? .17 : .15;
     const g = new THREE.Group(); g.position.set(Math.sin(a) * r, Math.cos(a) * r, .11); g.rotation.z = -a; cur.add(g);
+    if (diver && i % 3) {                                         // у дайвера на часовых отметках круглые точки с люмом
+      cylZ(.052, .03, polished, 0, 0, .016, g, 24); cylZ(.039, .006, lume, 0, 0, .033, g, 24);
+      continue;
+    }
     const bars = i === 0 ? (dress ? [-.044, .044] : [-.036, .036]) : [0];
     for (const bx of bars) {
-      add(new RoundedBoxGeometry(dress ? .066 : .052, len, dress ? .04 : .032, 2, .008), polished, bx, 0, dress ? .02 : .016, g);
+      if (dress) add(extrude(poly([[-.02, -len / 2 + .013], [.02, -len / 2 + .013], [.02, len / 2 - .013], [-.02, len / 2 - .013]]), .012, .013), polished, bx, 0, .013, g);   // гранёная метка: скошенные грани ловят свет
+      else add(new RoundedBoxGeometry(.052, len, .032, 2, .008), polished, bx, 0, .016, g);
       if (!dress) add(new THREE.BoxGeometry(.028, len - .035, .004), lume, bx, 0, .034, g);
     }
   }
@@ -221,7 +273,7 @@ export function buildWatch(scene, opts = {}) {
   cur = L.hands;
   const makeHand = (pts, lumeW, lumeFrom, lumeTo, z) => {
     const g = new THREE.Group(); g.position.z = z; cur.add(g);
-    add(extrude(poly(pts), .008, .003), polished, 0, 0, 0, g);
+    add(extrude(poly(pts), dress ? .004 : .008, dress ? .006 : .003), polished, 0, 0, 0, g);
     if (!dress) add(new THREE.BoxGeometry(lumeW, lumeTo - lumeFrom, .004), lume, 0, (lumeFrom + lumeTo) / 2, .013, g);
     return g;
   };
@@ -230,7 +282,7 @@ export function buildWatch(scene, opts = {}) {
   const mHand = makeHand(dress ? [[-.01, -.08], [.01, -.08], [.042, .17], [0, .69], [-.042, .17]] : [[-.024, -.09], [.024, -.09], [.036, .54], [0, .7], [-.036, .54]], .032, .14, .52, .166);
   // библиотека стрелок (только у «dress»): дофин, меч, лист — все лежат в модели, показывается один набор
   const handSets = [[hHand.children[0], mHand.children[0]]];
-  if (dress) for (const [hp, mp] of [
+  if (nh) for (const [hp, mp] of [
     [[[-.03, -.08], [.03, -.08], [.03, .35], [0, .42], [-.03, .35]], [[-.023, -.08], [.023, -.08], [.023, .62], [0, .69], [-.023, .62]]],
     [[[-.01, -.08], [.01, -.08], [.03, .04], [.06, .2], [0, .43], [-.06, .2], [-.03, .04]], [[-.008, -.08], [.008, -.08], [.024, .1], [.048, .34], [0, .7], [-.048, .34], [-.024, .1]]],
   ]) {
@@ -245,7 +297,7 @@ export function buildWatch(scene, opts = {}) {
   cylZ(.052, .05, polished, 0, 0, .168);
   cylZ(.024, .012, dress ? polished : orange, 0, 0, .198);
   // стрелки субциферблатов
-  const subHands = (dress ? [] : SUB).map(([x, y]) => {
+  const subHands = (nh ? [] : SUB).map(([x, y]) => {
     const g = new THREE.Group(); g.position.set(x, y, .118); cur.add(g);
     add(extrude(poly([[-.012, -.03], [.012, -.03], [.005, .15], [-.005, .15]]), .004), polished, 0, 0, 0, g);
     cylZ(.02, .008, polished, 0, 0, .004, g);
@@ -264,7 +316,7 @@ export function buildWatch(scene, opts = {}) {
   { const m = add(new THREE.CylinderGeometry(.09, .078, .025, 24), polished, 1.178, 0, -.03); m.rotation.z = -Math.PI / 2; }
   { const m = add(new THREE.CylinderGeometry(.03, .03, .01, 16), dress ? polished : orange, 1.193, 0, -.03); m.rotation.z = Math.PI / 2; }
   for (const s of dress ? [] : [-1, 1]) {                                                            // у «dress» нет кнопок хронографа
-    add(new RoundedBoxGeometry(.1, .1, .15, 2, .03), brushed, .985, s * .165, -.03);                   // защита головки
+    add(new RoundedBoxGeometry(.1, .1, .15, 2, .03), brushed, .985, s * .165, -.03); if (diver) continue;                   // защита головки
     const p = new THREE.Group(); p.rotation.z = s * .6; p.position.z = -.03; cur.add(p);                // кнопка
     let m = add(new THREE.CylinderGeometry(.078, .078, .06, 24), brushed, 1.0, 0, 0, p); m.rotation.z = Math.PI / 2;
     m = add(new THREE.CylinderGeometry(.06, .06, .11, 24), polished, 1.075, 0, 0, p); m.rotation.z = Math.PI / 2;
@@ -289,7 +341,7 @@ export function buildWatch(scene, opts = {}) {
     const pt = p => [A * Math.sin(p), Z0 - B + B * Math.cos(p)];
     const cum = [0]; let prev = pt(phi0);
     for (let i = 1; i <= N; i++) { const q = pt(phi0 + (phi1 - phi0) * i / N); cum.push(cum[i - 1] + Math.hypot(q[0] - prev[0], q[1] - prev[1])); prev = q; }
-    const L = cum[N], rows = Math.round(L / .27), pitch = L / rows, len = pitch - .022;
+    const L = cum[N], rows = Math.round(L / .27), pitch = L / rows, len = pitch - (fine ? .005 : .022);
     const gMid = new RoundedBoxGeometry(.25, len, .11, 3, .035), gIn = new RoundedBoxGeometry(.09, len * .82, .1, 3, .03), gOut = new RoundedBoxGeometry(.17, len, .115, 3, .035);
     const g3Mid = new RoundedBoxGeometry(.33, len, .115, 3, .035), g3Out = new RoundedBoxGeometry(.235, len, .11, 3, .035);
     let j = 0;
@@ -299,7 +351,7 @@ export function buildWatch(scene, opts = {}) {
       const row = new THREE.Group(); row.position.set(0, y, z);
       row.rotation.x = Math.atan2(-B * Math.sin(p), A * Math.cos(p));
       row.scale.x = 1 - .15 * Math.sin(Math.PI * k / (rows - 1));                                       // сужение к застёжке
-      if (dress) {                                                                                      // трёхрядный браслет
+      if (nh) {                                                                                      // трёхрядный браслет
         add(g3Mid, brushed, 0, 0, 0, row);
         for (const s of [-1, 1]) add(g3Out, brushed, s * .292, 0, 0, row);
       } else {
@@ -320,7 +372,7 @@ export function buildWatch(scene, opts = {}) {
 
   /* ── задняя крышка с видимым механизмом ── */
   const back = layer(-2.3, -.16, true), cover = layer(-3.1, -.16, true);
-  cylZ(.6, .12, dress ? brushed : brass, 0, 0, -.062, back, 64);   // тело механизма: у «dress» стальное, как у NH35
+  cylZ(.6, .12, nh ? brushed : brass, 0, 0, -.062, back, 64);   // тело механизма: у «dress» стальное, как у NH35
   cylZ(.615, .03, polished, 0, 0, -.02, back, 64);             // стальное кольцо-держатель
   add(extrude(gearShape(.825, .825, 48, .6), .03), brushed, 0, 0, .026, cover);   // толщина задней крышки
   back.userData.spin = true;                                  // при разборке механизм разворачивается лицом к зрителю
@@ -328,8 +380,8 @@ export function buildWatch(scene, opts = {}) {
   const plateCv = makeCanvas(1024), plateTex = colorTex(plateCv);
   {
     const c = plateCv.getContext('2d');
-    c.fillStyle = dress ? '#a4a9b0' : '#b8bcc2'; c.fillRect(0, 0, 1024, 1024);
-    if (dress) {
+    c.fillStyle = nh ? '#a4a9b0' : '#b8bcc2'; c.fillRect(0, 0, 1024, 1024);
+    if (nh) {
       // «рабочая» отделка, как у NH35: серая сталь с перлажем — рядами мелких круговых шлифовок
       for (let y = 0, r = 0; y < 1060; y += 34, r++) for (let x = (r % 2) * 20; x < 1060; x += 40) {
         const g = c.createRadialGradient(x - 6, y - 6, 1, x, y, 24);
@@ -382,8 +434,8 @@ export function buildWatch(scene, opts = {}) {
   {
     const s = new THREE.Shape();
     s.moveTo(.56, 0); s.absarc(0, 0, .56, 0, Math.PI, false); s.lineTo(-.44, 0); s.absarc(0, 0, .44, Math.PI, 0, true); s.closePath();
-    rotorSeg = add(extrude(s, .022, .004), dress ? rose : gold, 0, 0, 0, rotor);                        // тяжёлый сегмент
-    if (dress) {
+    rotorSeg = add(extrude(s, .022, .004), dress ? rose : diver ? steelRotor : gold, 0, 0, 0, rotor);                        // тяжёлый сегмент
+    if (nh) {
       // гравировка по дуге ротора, как на заводском роторе этого механизма
       const cv = makeCanvas(1024), c = cv.getContext('2d'), tex = colorTex(cv);
       c.clearRect(0, 0, 1024, 1024); c.fillStyle = 'rgba(30,34,40,.85)'; c.font = '500 30px Unbounded, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
@@ -401,6 +453,10 @@ export function buildWatch(scene, opts = {}) {
   }
   // стекло и гравированное кольцо крышки
   add(new THREE.CircleGeometry(.6, 96), glassMat, 0, 0, .054, cover);
+  // глухая стальная крышка вместо стекла — по выбору (механизм скрыт)
+  const solidBack = cylZ(.6, .014, brushed, 0, 0, .047, cover, 64); solidBack.visible = false;
+  const setCaseback = solid => { solidBack.visible = !!solid; };
+  const setLogo = text => { brand = text || ''; drawDial(); };
   const backCv = makeCanvas(1024), backTex = colorTex(backCv);
   function drawBack() {
     const c = backCv.getContext('2d'), R = 512;
@@ -466,5 +522,5 @@ export function buildWatch(scene, opts = {}) {
     V = v; drawDial(); drawBezel();
     orange.color.set(v.accent); brushed.color.set(v.metal[0]); polished.color.set(v.metal[1]); bezelMat.color.set(v.metal[1]);
   }
-  return { watch, update, parts, anchor, setVariant, setHands, setRotor };
+  return { watch, update, parts, anchor, setVariant, setHands, setRotor, setCaseback, setLogo };
 }
