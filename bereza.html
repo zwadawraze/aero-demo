@@ -355,6 +355,7 @@
   .chips button:hover { border-color: var(--ink); }
   .chips button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .bnote { margin-top: 10px; font-size: 11px; line-height: 1.5; color: var(--mute); letter-spacing: .02em; }
+  .bare #story, .bare header, .bare .counter, .bare .hint, .bare #buildBtn, .bare #rail, .bare #callout, .bare #ping { display: none !important; }
   body.building #parts { opacity: 0; transition: opacity .3s; }
   body.building .hint, body.building .counter { opacity: 0 !important; }
 
@@ -516,7 +517,11 @@ document.querySelectorAll('.say').forEach(p => {
   p.innerHTML = p.textContent.trim().split(/\s+/).map((w, i) => `<span class="w" style="transition-delay:${(.45 + i * .03).toFixed(2)}s">${w}</span>`).join(' ');
 });
 
-requestAnimationFrame(() => chapters[0].classList.add('in'));   // заголовок появляется сразу, не дожидаясь загрузки 3D
+requestAnimationFrame(() => chapters[0].classList.add('in'));
+if (new URLSearchParams(location.search).has('bare')) document.documentElement.classList.add('bare');   // ?bare=1 — только часы, без текста и кнопок
+const startCh = +(new URLSearchParams(location.search).get('ch') || 0);   // ?ch=N — открыть сразу нужную главу
+if (startCh) addEventListener('load', () => scrollTo({ top: steps[startCh].offsetTop, behavior: 'auto' }));
+   // заголовок появляется сразу, не дожидаясь загрузки 3D
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function go(i) {
   i = Math.max(0, Math.min(chapters.length - 1, i));
@@ -631,8 +636,11 @@ const rim = new THREE.DirectionalLight(0xffffff, .45); rim.position.set(-5, 1, -
 const fill = new THREE.DirectionalLight(0xffffff, .3); fill.position.set(-2, -4, 5); scene.add(fill);
 
 // настройки модели под «Белую берёзу»: трёхстрелочник, гладкий безель, фактурный циферблат, свои подписи деталей
+const OLD = new URLSearchParams(location.search).has('old');   // ?old=1 — прежний вид модели, для сравнения «было — стало»
+if (OLD) { key.intensity = 2.8; rim.intensity = 1.8; fill.intensity = 1.2; renderer.toneMappingExposure = 1.05; }
 const WATCH = {
-  renderer,
+  renderer: OLD ? null : renderer,
+
   style: 'dress', brand: 'ХроноКастом',
   backText: 'AUTOMATIC  ·  MECHANICAL MOVEMENT  ·  SAPPHIRE CRYSTAL  ·  10 ATM  ·  STAINLESS STEEL 316L  ·  ',
   partMats: ['сапфировое', 'сталь 316L, полировка', 'полированная сталь, синёная секундная', 'металл, объёмная фактура', 'сталь 316L, 40 мм', 'Seiko NH35, автоподзавод', 'сталь и прозрачное стекло', 'сталь 316L, три ряда звеньев'],
