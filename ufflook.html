@@ -372,6 +372,7 @@
     .chapter.left .pin, .chapter.right .pin { left: 50%; right: auto; top: 6px; }
   }
 </style>
+<style>/* кнопка звука: при наведении не выглядит включённой, иначе после выключения казалось, что звук всё ещё идёт */ #sound[aria-pressed="false"]:hover { background: none !important; color: inherit !important; }</style>
 </head>
 <body>
 
@@ -390,7 +391,7 @@
     <a data-go="7">Заказ</a>
   </nav>
   <div class="right">
-    <button class="xbtn" id="sound" type="button" aria-pressed="false" title="Тиканье механизма">♪ Звук</button>
+    <button class="xbtn" id="sound" type="button" aria-pressed="false" title="Тиканье механизма">♪ Звук выкл</button>
     <button class="xbtn" id="explode" type="button" aria-pressed="false">Разобрать</button>
     <div id="clock"><i></i><span>00:00:00</span></div>
   </div>
@@ -598,6 +599,8 @@ soundBtn.addEventListener('click', () => {
     G = buildGraph(actx); master = G.out; master.gain.value = 0; master.connect(actx.destination);
   }
   soundOn = !soundOn; soundBtn.setAttribute('aria-pressed', soundOn);
+  soundBtn.textContent = soundOn ? '♪ Звук вкл' : '♪ Звук выкл';
+  if (!soundOn) { master.gain.cancelScheduledValues(actx.currentTime); master.gain.setValueAtTime(0, actx.currentTime); }   // выключение — сразу, без затухания
   clearInterval(tickTimer);
   if (soundOn) {
     actx.resume();
